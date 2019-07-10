@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.best.dao.UserDao">
+
+
+
+	<insert id="insert" useGeneratedKeys="true" keyProperty="id" parameterType="User">
+       insert into ct_user (username, age) values
+       (#{username}, #{age})
+    </insert>
+
+	<update id="update">
+		update ct_user set username=#{username} where id= 1
+	</update>
+
+	<select id="findList" resultType="User" flushCache="true">
+		SELECT * FROM ct_user
+	</select>
+    <select id="count" resultType="java.lang.Integer">
+		SELECT count(1) FROM ct_user
+	</select>
+
+
+</mapper>
