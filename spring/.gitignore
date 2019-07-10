@@ -1,2 +1,8 @@
-*/*.idea/*
-*/*.target/*
+.idea/
+code-clean/code-clean.iml
+jdk-demo/jdk-demo.iml
+spring-circular-dependency/spring-circular-dependency.iml
+spring-web/spring-web.iml
+spring.iml
+/.idea/
+!/spring.iml
