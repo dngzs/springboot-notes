@@ -1,5 +1,7 @@
 package hashmap;
 
+
+import bbb.A.*;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -22,5 +24,6 @@ public class HashMapDemo {
         map.put("9","张9");
         map.put("10","张10");
 
+        A A = new A();
     }
 }

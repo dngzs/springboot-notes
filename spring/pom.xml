@@ -12,6 +12,7 @@
         <module>jdk-demo</module>
         <module>spring-web</module>
         <module>code-clean</module>
+        <module>springboot-dev</module>
     </modules>
 
     <packaging>pom</packaging>
