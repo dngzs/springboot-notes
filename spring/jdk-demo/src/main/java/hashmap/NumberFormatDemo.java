@@ -1,5 +1,6 @@
 package hashmap;
 
+import java.math.BigDecimal;
 import java.text.NumberFormat;
 
 /**
@@ -13,5 +14,12 @@ public class NumberFormatDemo {
         NumberFormat num = NumberFormat.getPercentInstance();
         String rates = num.format(rate);
         System.out.println(rates);
+
+
+        Double a = 0.3;
+        BigDecimal bigDecimal1 = new BigDecimal(a);
+        BigDecimal bigDecimal2 = new BigDecimal(a.toString());
+        System.out.println(bigDecimal1);
+        System.out.println(bigDecimal2);
     }
 }

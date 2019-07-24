@@ -3,10 +3,11 @@ package com.best.configuration;
 import com.best.vo.Car;
 import com.best.vo.User;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.stereotype.Component;
 
 
-@Component
+@Configuration
 public class Config {
 
 

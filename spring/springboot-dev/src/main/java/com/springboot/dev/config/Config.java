@@ -8,6 +8,7 @@ import com.springboot.dev.vo.Car;
 import com.springboot.dev.vo.User;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Component;
 
 
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Component;
 public class Config {
 
     @Bean
+    @Scope
     public User user(){
         return new User(car());
     }

@@ -13,6 +13,7 @@
         <module>spring-web</module>
         <module>code-clean</module>
         <module>springboot-dev</module>
+        <module>spring-aop</module>
     </modules>
 
     <packaging>pom</packaging>
