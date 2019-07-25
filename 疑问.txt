@@ -1,0 +1,3 @@
+IOC容器模块的疑问
+1、在注册AnnotationAwareAspectJAutoProxyCreator的时候，将注册的BeanDefinition封装到BeanComponentDefinition中,并注册进入ParserContext中，
+为何要这样干，这样做的目的是什么，在什么时候注入到容器的？

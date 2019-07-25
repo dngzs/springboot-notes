@@ -7,5 +7,11 @@
 
     <bean id="aspect" class="com.best.aspect.DogAspect"/>
 
+    <bean id="tagetsource" class="com.best.targetsource.DogTargetSource"/>
+
+    <aop:aspectj-autoproxy>
+        <aop:include name="aspect"></aop:include>
+    </aop:aspectj-autoproxy>
+
     <aop:aspectj-autoproxy/>
 </beans>
