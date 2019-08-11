@@ -14,6 +14,7 @@
         <module>code-clean</module>
         <module>springboot-dev</module>
         <module>spring-aop</module>
+        <module>mybatis-dev</module>
     </modules>
 
     <packaging>pom</packaging>
