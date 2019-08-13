@@ -17,7 +17,10 @@ public class App {
         SqlSessionFactory sqlSessionFactory = builder.build(inputStream);
         SqlSession sqlSession = sqlSessionFactory.openSession();
         UserMapper mapper = sqlSession.getMapper(UserMapper.class);
-        User user = mapper.getById(1L);
+        User query = new User();
+        query.setAge(18);
+        query.setId(1L);
+        User user = mapper.getWithPo(query);
         System.out.println(user);
     }
 }

@@ -4,6 +4,12 @@
 <mapper namespace="com.best.dao.UserMapper">
 
     <select id="getById" resultType="com.best.po.User">
-        select * from ct_user where id = ${id}
+        select * from ct_user where id = #{id}
+    </select>
+    <select id="getWithAgeAndId" resultType="com.best.po.User">
+         select * from ct_user where id = #{id} and age = #{age}
+    </select>
+    <select id="getWithPo" resultType="com.best.po.User">
+         select * from ct_user where id = #{id} and age = #{age}
     </select>
 </mapper>
