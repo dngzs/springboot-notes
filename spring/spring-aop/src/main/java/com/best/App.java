@@ -1,5 +1,6 @@
 package com.best;
 
+import com.best.asm.Bc;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.support.ClassPathXmlApplicationContext;
 
@@ -12,5 +13,6 @@ public class App {
         ApplicationContext context = new ClassPathXmlApplicationContext("applicationContext.xml");
         Dog dog = context.getBean(Dog.class);
         dog.run();
+        Bc bc = new Bc();
     }
 }

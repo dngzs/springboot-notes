@@ -12,10 +12,10 @@ import org.springframework.stereotype.Component;
 import java.util.Arrays;
 
 /**
- * 切面类
+ * 锟斤拷锟斤拷锟斤拷
  * @author lfy
  *
- * @Aspect： 告诉Spring当前类是一个切面类
+ * @Aspect锟斤拷 锟斤拷锟斤拷Spring锟斤拷前锟斤拷锟斤拷一锟斤拷锟斤拷锟斤拷锟斤拷
  *
  */
 @Aspect
@@ -30,23 +30,23 @@ public class LogAspects {
 	@Before("pointCut()")
 	public void logStart(JoinPoint joinPoint){
 		Object[] args = joinPoint.getArgs();
-		System.out.println(""+joinPoint.getSignature().getName()+"运行。。。@Before:参数列表是：{"+Arrays.asList(args)+"}");
+		System.out.println(""+joinPoint.getSignature().getName()+"@Before{"+Arrays.asList(args)+"}");
 	}
 
 	@After("com.best.aop.LogAspects.pointCut()")
 	public void logEnd(JoinPoint joinPoint){
-		System.out.println(""+joinPoint.getSignature().getName()+"结束。。。@After");
+		System.out.println(""+joinPoint.getSignature().getName()+"@After");
 	}
 
 
 	@AfterReturning(value="pointCut()",returning="result")
 	public void logReturn(JoinPoint joinPoint, Object result){
-		System.out.println(""+joinPoint.getSignature().getName()+"正常返回。。。@AfterReturning:运行结果：{"+result+"}");
+		System.out.println(""+joinPoint.getSignature().getName()+"@AfterReturning:{"+result+"}");
 	}
 
 	@AfterThrowing(value="pointCut()",throwing="exception")
 	public void logException(JoinPoint joinPoint, Exception exception){
-		System.out.println(""+joinPoint.getSignature().getName()+"异常。。。异常信息：{"+exception+"}");
+		System.out.println(""+joinPoint.getSignature().getName()+"{"+exception+"}");
 	}
 
 }

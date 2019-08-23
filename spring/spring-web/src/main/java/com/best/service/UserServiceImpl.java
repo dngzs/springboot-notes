@@ -41,8 +41,18 @@ public class UserServiceImpl implements UserService {
     }
 
     @Transactional(propagation = Propagation.REQUIRED)
-    @AfterCommit
+    @AfterCommit("test2")
     public List<User> test1(){
+        List<User> list = userDao.findList();
+        insert();
+        SmsVo smsVo = new SmsVo();
+        smsVo.setIds(Arrays.asList(1L));
+        SmsEvent smsEvent = new SmsEvent(smsVo);
+        publisher.publishEvent(smsEvent);
+        return list;
+    }
+
+    public List<User> test2(){
         List<User> list = userDao.findList();
         insert();
         SmsVo smsVo = new SmsVo();

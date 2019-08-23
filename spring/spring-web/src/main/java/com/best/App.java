@@ -1,6 +1,7 @@
 package com.best;
 
 
+import com.best.service.UserService;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.support.ClassPathXmlApplicationContext;
 
@@ -10,7 +11,7 @@ public class App
         ApplicationContext applicationContext = new ClassPathXmlApplicationContext("spring.xml");
         ((ClassPathXmlApplicationContext) applicationContext).setAllowBeanDefinitionOverriding(false);
         //MathCalculator bean = applicationContext.getBean(MathCalculator.class);
-       // bean.div(1,2);
+        //bean.div(1,2);
 
         /*-------------------------------*/
         /*User bean = (User)applicationContext.getBean("user");
@@ -23,9 +24,9 @@ public class App
 
         /*-------------------------------*/
 
-        /*UserService bean3 = applicationContext.getBean(UserService.class);
-        System.out.println(bean3.test1());*/
-        com.best.service.A bean4 = applicationContext.getBean(com.best.service.A.class);
-        bean4.b();
+        UserService bean3 = applicationContext.getBean(UserService.class);
+        System.out.println(bean3.test1());
+        //com.best.service.A bean4 = applicationContext.getBean(com.best.service.A.class);
+        //bean4.b();
     }
 }

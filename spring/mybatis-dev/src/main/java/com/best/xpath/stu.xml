@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<students>
+    <student score="23">
+        <name>"张三"</name>
+        <sex>女</sex>
+        <id>1003</id>
+    </student>
+
+    <student score="24">
+        <name>"李四"</name>
+        <sex>男</sex>
+        <id>1004</id>
+    </student>
+
+    <student id="1005">
+        <name>"张五"</name>
+        <sex>男</sex>
+        <score>25</score>
+    </student>
+
+</students>

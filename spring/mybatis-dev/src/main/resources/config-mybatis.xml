@@ -3,9 +3,22 @@
         "http://mybatis.org/dtd/mybatis-3-config.dtd">
 <configuration>
 
+    <properties resource="mybatis.properties">
+        <property name="lang" value="java"/>
+        <property name="name" value="lisi"/>
+        <property name="age" value="18"/>
+        <property name="jdbcTypeForNull" value="OTHER"/>
+    </properties>
+
     <settings>
         <setting name="logImpl" value="LOG4J"/>
+        <setting name="jdbcTypeForNull" value="${jdbcTypeForNull}"/>
     </settings>
+
+    <typeAliases>
+        <typeAlias type="com.best.vo.CtUser"/>
+        <typeAlias type="com.best.po.User"/>
+    </typeAliases>
 
     <environments default="">
         <environment id="">

@@ -3,13 +3,13 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.best.dao.UserMapper">
 
-    <select id="getById" resultType="com.best.po.User">
+    <select id="getById" resultType="ctUser">
         select * from ct_user where id = #{id}
     </select>
-    <select id="getWithAgeAndId" resultType="com.best.po.User">
+    <select id="getWithAgeAndId" resultType="ctUser">
          select * from ct_user where id = #{id} and age = #{age}
     </select>
-    <select id="getWithPo" resultType="com.best.po.User">
+    <select id="getWithPo" resultType="ctUser">
          select * from ct_user where id = #{id} and age = #{age}
     </select>
 </mapper>

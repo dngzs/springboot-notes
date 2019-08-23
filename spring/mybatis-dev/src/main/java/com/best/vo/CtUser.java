@@ -1,8 +1,10 @@
-package com.best.po;
+package com.best.vo;
 
-import org.apache.ibatis.type.Alias;
-
-public class User {
+/**
+ * @author dngzs
+ * @date 2019-08-23 21:00
+ */
+public class CtUser {
 
     private Integer age;
 

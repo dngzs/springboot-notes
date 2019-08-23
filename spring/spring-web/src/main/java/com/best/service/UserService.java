@@ -10,4 +10,6 @@ public interface UserService {
 
 
     int count();
+
+    public List<User> test2();
 }

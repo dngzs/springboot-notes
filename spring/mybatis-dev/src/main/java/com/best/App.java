@@ -2,6 +2,7 @@ package com.best;
 
 import com.best.dao.UserMapper;
 import com.best.po.User;
+import com.best.vo.CtUser;
 import org.apache.ibatis.io.Resources;
 import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
@@ -20,7 +21,7 @@ public class App {
         User query = new User();
         query.setAge(18);
         query.setId(1L);
-        User user = mapper.getWithPo(query);
+        CtUser user = mapper.getWithPo(query);
         System.out.println(user);
     }
 }
