@@ -20,8 +20,15 @@
         <typeAlias type="com.best.po.User"/>
     </typeAliases>
 
-    <environments default="">
-        <environment id="">
+
+    <typeHandlers>
+        <package name="com.best.typeHandler"/>
+    </typeHandlers>
+
+
+
+    <environments default="mysql">
+        <environment id="mysql">
             <transactionManager type="jdbc"></transactionManager>
             <dataSource type="POOLED">
                 <property name="driver" value="com.mysql.jdbc.Driver"></property>
@@ -32,7 +39,11 @@
         </environment>
     </environments>
 
+
+
     <mappers>
         <mapper resource="UserMapper.xml"></mapper>
+        <mapper url="C:\spring\mybatis-dev\src\main\resources.UserMapper.xml"/>
+        <mapper resource="com.best.dao.UserMapper"/>
     </mappers>
 </configuration>
