@@ -811,3 +811,296 @@ private void settingsElement(Properties props) throws Exception {
 
 #### 2.8 环境配置（environments）
 
+MyBatis 可以配置成适应多种环境，这种机制有助于将 SQL 映射应用于多种数据库之中， 现实情况下有多种理由需要这么做。例如，开发、测试和生产环境需要有不同的配置；或者想在具有相同 Schema 的多个生产数据库中 使用相同的 SQL 映射。有许多类似的使用场景。
+
+**不过要记住：尽管可以配置多个环境，但每个 SqlSessionFactory 实例只能选择一种环境。**
+
+环境中有几个比较关键的设置，我们看下这个配置
+
+```xml
+<environments default="mysql">
+        <environment id="mysql">
+            <transactionManager type="jdbc"></transactionManager>
+            <dataSource type="POOLED">
+                <property name="driver" value="com.mysql.jdbc.Driver"></property>
+                <property name="url" value="jdbc:mysql://127.0.0.1:3306/chat"></property>
+                <property name="username" value="root"></property>
+                <property name="password" value="root"></property>
+            </dataSource>
+        </environment>
+</environments>
+```
+
+- 默认使用的环境 ID（比如：default="development"）。
+- 每个 environment 元素定义的环境 ID（比如：id="development"）。
+
+- 事务管理器的配置（比如：type="JDBC"）。
+- 数据源的配置（比如：type="POOLED"）
+
+还有一个 注意的点，default的取值是每个环境中的某一个id,而不是让你随便命名的
+
+好了，简单的就理解到这里吧，我们来分析下源码，源码中可能会产生几个可能大家平时都可以见到的对象，这里我们在使用的时候来分析下这些组件
+
+```java
+ environmentsElement(root.evalNode("environments"));
+```
+
+```java
+ private void environmentsElement(XNode context) throws Exception {
+    if (context != null) {
+      if (environment == null) {
+        //获取default值
+        environment = context.getStringAttribute("default");
+      }
+      for (XNode child : context.getChildren()) {
+        //获取子元素（environment）的id值
+        String id = child.getStringAttribute("id");
+        //判断这个id值是不是和default的值一样，如果一样，继续解析
+        if (isSpecifiedEnvironment(id)) {
+          //获取TransactionFactory，通过<transactionManager>节点配置的
+          TransactionFactory txFactory = transactionManagerElement(child.evalNode("transactionManager"));
+          //获取DataSourceFactory，通过<dataSource>节点配置的
+          DataSourceFactory dsFactory = dataSourceElement(child.evalNode("dataSource"));
+          DataSource dataSource = dsFactory.getDataSource();
+          //new一个Environment.Builder对象，这里用了建造者模式
+          Environment.Builder environmentBuilder = new Environment.Builder(id)
+               //设置了TransactionFactory
+              .transactionFactory(txFactory)
+              //设置了dataSource数据源
+              .dataSource(dataSource);
+          //然后将environment加入configuration对象中
+          configuration.setEnvironment(environmentBuilder.build());
+        }
+      }
+    }
+  }
+```
+
+#### 2.9 typeHandlers
+
+typeHandler算是比较重要的一个东西了，其实我们程序能够正常运行，是因为mybatis帮助我们配置了很多默认的typeHandler，那么typeHandler有什么作用，我们来了解一下
+
+1. 在预处理语句（PreparedStatement）中设置一个参数时，mybatis会用到typeHandler
+2. 从结果集中取出一个值时还是会用到typeHandler
+
+那么到底是干啥的，其实就是jdbcType和java类型的映射，我的理解，那么我们去看看源码，到底是不是这样的，可以看到typeHandler的配置和别名的配置基本类似，可以用扫包
+
+```java
+typeHandlerElement(root.evalNode("typeHandlers"));
+
+private void typeHandlerElement(XNode parent) throws Exception {
+    if (parent != null) {
+      for (XNode child : parent.getChildren()) {
+         //子节点为package时，获取其name属性的值，然后自动扫描package下的自定义typeHandler
+        if ("package".equals(child.getName())) {
+          String typeHandlerPackage = child.getStringAttribute("name");
+          //注册到configuration里的typeHandlerRegistry成员中
+          typeHandlerRegistry.register(typeHandlerPackage);
+        } else {
+          //子节点为typeHandler时， 可以指定javaType属性， 也可以指定jdbcType, 也可两者都指定
+          //javaType 是指定java类型
+          //jdbcType 是指定jdbc类型（数据库类型： 如varchar）
+          String javaTypeName = child.getStringAttribute("javaType");
+          String jdbcTypeName = child.getStringAttribute("jdbcType");
+          String handlerTypeName = child.getStringAttribute("handler");
+          Class<?> javaTypeClass = resolveClass(javaTypeName);
+          JdbcType jdbcType = resolveJdbcType(jdbcTypeName);
+          Class<?> typeHandlerClass = resolveClass(handlerTypeName);
+          if (javaTypeClass != null) {
+            if (jdbcType == null) {
+              typeHandlerRegistry.register(javaTypeClass, typeHandlerClass);
+            } else {
+              typeHandlerRegistry.register(javaTypeClass, jdbcType, typeHandlerClass);
+            }
+          } else {
+           
+            typeHandlerRegistry.register(typeHandlerClass);
+          }
+        }
+      }
+    }
+  }
+```
+
+我们来分析下扫包的情况吧，下面的else其实是一样的注入方式
+
+这段扫包的代码是否似曾相识，不过还是有点不一样的
+
+```java
+public void register(String packageName) {
+  //通过ResolverUtil扫描到包下的TypeHandler类的所有子类
+  ResolverUtil<Class<?>> resolverUtil = new ResolverUtil<Class<?>>();
+  resolverUtil.find(new ResolverUtil.IsA(TypeHandler.class), packageName);
+  Set<Class<? extends Class<?>>> handlerSet = resolverUtil.getClasses();
+  for (Class<?> type : handlerSet) {
+    //忽略掉匿名内部类，接口和抽象方法
+    if (!type.isAnonymousClass() && !type.isInterface() && !Modifier.isAbstract(type.getModifiers())) {
+      //开始注册（继续看这段）
+      register(type);
+    }
+  }
+}
+```
+
+```java
+ public void register(Class<?> typeHandlerClass) {
+    boolean mappedTypeFound = false;
+     //查看是否有MappedTypes注解，该注解来指定与其关联的 Java 类型列表
+    MappedTypes mappedTypes = typeHandlerClass.getAnnotation(MappedTypes.class);
+    //如果有
+    if (mappedTypes != null) {
+      //拿到java类型，开始注册，并且把mappedTypeFound设置成true,表示找到了
+      for (Class<?> javaTypeClass : mappedTypes.value()) {
+        register(javaTypeClass, typeHandlerClass);
+        mappedTypeFound = true;
+      }
+    }
+    //如果没有注册到
+    if (!mappedTypeFound) {
+      //注册前，先获取到typeHandlerClass的实例（javaTypeClass设置成空）
+      register(getInstance(null, typeHandlerClass));
+    }
+}
+
+```
+
+```java
+//继续看注册方法（重载方法）
+public <T> void register(TypeHandler<T> typeHandler) {
+  boolean mappedTypeFound = false;
+  //查看是否有MappedTypes注解，该注解来指定与其关联的 Java 类型列表
+  MappedTypes mappedTypes = typeHandler.getClass().getAnnotation(MappedTypes.class);
+  if (mappedTypes != null) {
+    for (Class<?> handledType : mappedTypes.value()) {
+      register(handledType, typeHandler);
+      mappedTypeFound = true;
+    }
+  }
+  // @since 3.1.0 - 尝试自动发现映射类型
+  if (!mappedTypeFound && typeHandler instanceof TypeReference) {
+    try {
+      TypeReference<T> typeReference = (TypeReference<T>) typeHandler;
+      //这里的typeReference.getRawType()其实就是获取typeHandler上的泛型，可以看看TypeReference的构造函数
+      register(typeReference.getRawType(), typeHandler);
+      mappedTypeFound = true;
+    } catch (Throwable t) {
+      // maybe users define the TypeReference with a different type and are not assignable, so just ignore it
+    }
+  }
+  if (!mappedTypeFound) {
+    register((Class<T>) null, typeHandler);
+  }
+}
+```
+
+```java
+private <T> void register(Type javaType, TypeHandler<? extends T> typeHandler) {
+  //获取MappedJdbcTypes类型（jdbcType）
+  MappedJdbcTypes mappedJdbcTypes = typeHandler.getClass().getAnnotation(MappedJdbcTypes.class);
+  if (mappedJdbcTypes != null) {
+    for (JdbcType handledJdbcType : mappedJdbcTypes.value()) {
+      //如果找到，就开始注册
+      register(javaType, handledJdbcType, typeHandler);
+    }
+    if (mappedJdbcTypes.includeNullJdbcType()) {
+      register(javaType, null, typeHandler);
+    }
+  } else {
+    register(javaType, null, typeHandler);
+  }
+}
+```
+
+```java
+private void register(Type javaType, JdbcType jdbcType, TypeHandler<?> handler) {
+  if (javaType != null) {
+    //从map中获取，如果是空或者空集合
+    Map<JdbcType, TypeHandler<?>> map = TYPE_HANDLER_MAP.get(javaType);
+    if (map == null || map == NULL_TYPE_HANDLER_MAP) {
+      //就new一个
+      map = new HashMap<JdbcType, TypeHandler<?>>();
+      TYPE_HANDLER_MAP.put(javaType, map);
+    }
+    //map加入将 key-value:jdbcType->对应的handler
+    map.put(jdbcType, handler);
+  }
+  //然后将将key-value:javaType->handler.class,handler实例加入ALL_TYPE_HANDLERS_MAP
+  ALL_TYPE_HANDLERS_MAP.put(handler.getClass(), handler);
+}
+```
+
+基本上源码就分析完成了，就是解析到自定义的handlerType到typeHandlerRegistry的一个过程，当然typeHandlerRegistry在初始化的时候，已经帮我们注册了很多mybatis自带的了，这里我们来看下比较特殊的几个handlerType
+
+##### 2.9.1  EnumTypeHandler和 EnumOrdinalTypeHandler
+
+若想映射枚举类型 `Enum`，则需要从 `EnumTypeHandler` 或者 `EnumOrdinalTypeHandler` 中选一个来使用。
+
+EnumTypeHandler是通过Enum的name()来存储的
+
+EnumOrdinalTypeHandler是通过Enum的ordinal()来存储的，也就是索引，注意，这里的索引是从0开始的
+
+至于源码就不看了，很简单，如果自己定义了一些枚举，可能用不了，但是可以自定义TypeHandler来处理自定义的枚举类
+
+#### 2.10 mapper映射器
+
+接下来就是比较重要的内容了，解析 mapper，至于mapper，相比大家再熟悉不过了
+
+```xml
+<mappers>
+        <mapper resource="UserMapper.xml"></mapper>
+        <mapper url="C:\spring\mybatis-dev\src\main\resources.UserMapper.xml"/>
+        <mapper resource="com.best.dao.UserMapper"/>
+    </mappers>
+```
+
+上面这就是一个mapper的配置，告诉mybatis，你的mapper文件存放在哪里，下面我们着重看下注册mapper的整个源码过程
+
+```java
+mapperElement(root.evalNode("mappers"));
+```
+
+```java
+private void mapperElement(XNode parent) throws Exception {
+  if (parent != null) {
+    //获取mappers的子节点mapper列表
+    for (XNode child : parent.getChildren()) {
+      //如果是package
+      if ("package".equals(child.getName())) {
+        String mapperPackage = child.getStringAttribute("name");
+        //这里会扫包
+        configuration.addMappers(mapperPackage);
+      } else {
+        //获取resource、class、url
+        String resource = child.getStringAttribute("resource");
+        String url = child.getStringAttribute("url");
+        String mapperClass = child.getStringAttribute("class");
+        //如果resource（mapper.xml的路径）不是空，其他都是空
+        if (resource != null && url == null && mapperClass == null) {
+          ErrorContext.instance().resource(resource);
+          //获取文件流
+          InputStream inputStream = Resources.getResourceAsStream(resource);
+          //开始解析xml文件
+          XMLMapperBuilder mapperParser = new XMLMapperBuilder(inputStream, configuration, resource, configuration.getSqlFragments());
+          //开始解析mapper xml文件
+          mapperParser.parse();
+        //url不是空，其他都是空
+        } else if (resource == null && url != null && mapperClass == null) {  
+          ErrorContext.instance().resource(url);
+          //也是获取文件流
+          InputStream inputStream = Resources.getUrlAsStream(url);
+          XMLMapperBuilder mapperParser = new XMLMapperBuilder(inputStream, configuration, url, configuration.getSqlFragments());
+          mapperParser.parse();
+        //class不是空，其他都是空
+        } else if (resource == null && url == null && mapperClass != null) {  //获取class对象
+          Class<?> mapperInterface = Resources.classForName(mapperClass);
+           //直接加入
+          configuration.addMapper(mapperInterface);
+        } else {
+          throw new BuilderException("A mapper element may only specify a url, resource or class, but not more than one.");
+        }
+      }
+    }
+  }
+}
+```
+
