@@ -26,6 +26,8 @@
 
 	<mvc:annotation-driven/>
 
+	<bean class="org.springframework.validation.beanvalidation.MethodValidationPostProcessor"></bean>
+
 
 	<!-- 配置使用SimpleMappingExceptionResolver来映射异常 -->
 	<bean class="org.springframework.web.servlet.handler.SimpleMappingExceptionResolver">

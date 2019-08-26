@@ -18,6 +18,7 @@
     <typeAliases>
         <typeAlias type="com.best.vo.CtUser"/>
         <typeAlias type="com.best.po.User"/>
+        <typeAlias type="com.best.po.Book"/>
     </typeAliases>
 
 
@@ -43,7 +44,6 @@
 
     <mappers>
         <mapper resource="UserMapper.xml"></mapper>
-        <mapper url="C:\spring\mybatis-dev\src\main\resources.UserMapper.xml"/>
-        <mapper resource="com.best.dao.UserMapper"/>
+        <mapper resource="BookMapper.xml"></mapper>
     </mappers>
 </configuration>

@@ -8,6 +8,7 @@ import org.springframework.context.EnvironmentAware;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.ModelMap;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.WebDataBinder;
 import org.springframework.web.bind.annotation.InitBinder;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -16,11 +17,13 @@ import org.springframework.web.bind.annotation.SessionAttributes;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpSession;
+import javax.validation.constraints.NotNull;
 import java.util.Date;
 import java.util.List;
 
 @Controller
 @SessionAttributes(value = "name")
+@Validated
 public class Index implements EnvironmentAware {
 
     private Environment environment;
@@ -53,7 +56,7 @@ public class Index implements EnvironmentAware {
 
     @RequestMapping("/lang")
     @ResponseBody
-    public Long genet(Long id) {
+    public Long genet(@NotNull(message = "id不能为空") Long id) {
         System.out.println();
         return id;
     }

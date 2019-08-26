@@ -1104,3 +1104,142 @@ private void mapperElement(XNode parent) throws Exception {
 }
 ```
 
+我们先来分析下不为空resource的情况下，创建XMLMapperBuilder对象来解析mapper文件，在new XMLMapperBuilder的过程中，会生成一个助理类
+
+```java
+public class MapperBuilderAssistant extends BaseBuilder {
+
+  private String currentNamespace;
+  private final String resource;
+  private Cache currentCache;
+  private boolean unresolvedCacheRef; // issue #676
+  //...省略
+}
+```
+
+他继承了BaseBuilder，而BaseBuilder里面存放了Configuration对象，TypeAliasRegistry--别名注册中心、TypeHandlerRegistry------类型注册中心；同时在MapperBuilderAssistant这里面还保存了缓存，当前的namespace以及加载路径等，也是比较重要的一个类，我们在接下来的分析的过程中还是会来分析它的
+
+这里面保存了缓存，当前的namespace以及加载路径等，也是比较重要的一个类，我们在接下来的分析的过程中还是会来分析它的
+
+```java
+XMLMapperBuilder mapperParser = new XMLMapperBuilder(inputStream, configuration, resource, configuration.getSqlFragments());
+mapperParser.parse();
+```
+
+解析开始
+
+```java
+public void parse() {
+  //判断下是不是已经解析过这个资源了
+  if (!configuration.isResourceLoaded(resource)) {
+    configurationElement(parser.evalNode("/mapper"));
+    configuration.addLoadedResource(resource);
+    bindMapperForNamespace();
+  }
+
+  parsePendingResultMaps();
+  parsePendingCacheRefs();
+  parsePendingStatements();
+}
+```
+
+```java
+//开始解析mapper节点
+configurationElement(parser.evalNode("/mapper"));
+
+private void configurationElement(XNode context) {
+    try {
+      //拿到namespace
+      String namespace = context.getStringAttribute("namespace");
+      if (namespace == null || namespace.equals("")) {
+        throw new BuilderException("Mapper's namespace cannot be empty");
+      }
+      //namespace设置到builderAssistant对象中
+      builderAssistant.setCurrentNamespace(namespace);
+      //开始解析缓存引用
+      cacheRefElement(context.evalNode("cache-ref"));
+      //解析缓存
+      cacheElement(context.evalNode("cache"));
+      //解析parameterMap节点
+      parameterMapElement(context.evalNodes("/mapper/parameterMap"));
+      //解析resultMap节点
+      resultMapElements(context.evalNodes("/mapper/resultMap"));
+      //解析sql节点
+      sqlElement(context.evalNodes("/mapper/sql"));
+      //解析curd节点
+      buildStatementFromContext(context.evalNodes("select|insert|update|delete"));
+    } catch (Exception e) {
+      throw new BuilderException("Error parsing Mapper XML. The XML location is '" + resource + "'. Cause: " + e, e);
+    }
+  }
+
+```
+
+接下来我们一个个来看看
+
+##### 2.10.1 cacheRef节点的解析
+
+```java
+private void cacheRefElement(XNode context) {
+  if (context != null) {
+     //加入到configuration中的cacheRefMap的HashMap中保存起来
+     //key-value:当前Namespace ----  被引用的namespace                   
+    configuration.addCacheRef(builderAssistant.getCurrentNamespace(), context.getStringAttribute("namespace"));
+    //new CacheRefResolver对象
+    CacheRefResolver cacheRefResolver = new CacheRefResolver(builderAssistant, context.getStringAttribute("namespace"));
+    try {
+      //这里是准备干啥呢？
+      cacheRefResolver.resolveCacheRef();
+    } catch (IncompleteElementException e) {
+      //如果异常就加入到IncompleteCacheRef LinkedList中
+      configuration.addIncompleteCacheRef(cacheRefResolver);
+    }
+  }
+}
+```
+
+CacheRefResolver对象里存放了MapperBuilderAssistant和被引用的namespace  
+
+```java
+public class CacheRefResolver {
+  private final MapperBuilderAssistant assistant;
+  private final String cacheRefNamespace;
+
+  public CacheRefResolver(MapperBuilderAssistant assistant, String cacheRefNamespace) {
+    this.assistant = assistant;
+    this.cacheRefNamespace = cacheRefNamespace;
+  }
+
+  public Cache resolveCacheRef() {
+    return assistant.useCacheRef(cacheRefNamespace);
+  }
+}
+```
+
+```java
+public Cache useCacheRef(String namespace) {
+  //被引用的namespace不能为空
+  if (namespace == null) {
+    throw new BuilderException("cache-ref element requires a namespace attribute.");
+  }
+  try {
+    unresolvedCacheRef = true;
+    //根据namespace中的Cache对象
+    Cache cache = configuration.getCache(namespace);
+    //如果cache是空的就直接抛错
+    if (cache == null) {
+      throw new IncompleteElementException("No cache for namespace '" + namespace + "' could be found.");
+    }
+    //把当前的cache指向引用的namespace cache? 不知道要干啥，再往下看
+    currentCache = cache;
+    unresolvedCacheRef = false;
+    return cache;
+  } catch (IllegalArgumentException e) {
+    //一般第一次进来这里都会异常，请看上面的configuration.addIncompleteCacheRef(cacheRefResolver);
+    throw new IncompleteElementException("No cache for namespace '" + namespace + "' could be found.", e);
+  }
+}
+```
+
+读完了整个cacheRefElement节点，一脸的懵逼，不知道他要干啥，先到这里，再往下看
+

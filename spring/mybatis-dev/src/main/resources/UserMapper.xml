@@ -3,6 +3,8 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.best.dao.UserMapper">
 
+    <cache-ref namespace="com.best.dao.BookMapper"  />
+
     <select id="getById" resultType="ctUser">
         select * from ct_user where id = #{id}
     </select>

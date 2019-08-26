@@ -1,6 +1,8 @@
 package com.best;
 
+import com.best.dao.BookMapper;
 import com.best.dao.UserMapper;
+import com.best.po.Book;
 import com.best.po.User;
 import com.best.vo.CtUser;
 import org.apache.ibatis.io.Resources;
@@ -21,7 +23,11 @@ public class App {
         User query = new User();
         query.setAge(18);
         query.setId(1L);
-        CtUser user = mapper.getWithPo(query);
+        CtUser user = mapper.getById(1l);
         System.out.println(user);
+
+        BookMapper bookMapper = sqlSession.getMapper(BookMapper.class);
+        Book book = bookMapper.getById(1L);
+        System.out.println(book);
     }
 }
