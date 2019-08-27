@@ -1041,9 +1041,11 @@ EnumOrdinalTypeHandler是通过Enum的ordinal()来存储的，也就是索引，
 
 至于源码就不看了，很简单，如果自己定义了一些枚举，可能用不了，但是可以自定义TypeHandler来处理自定义的枚举类
 
-#### 2.10 mapper映射器
+### 3.mapper映射器
 
-接下来就是比较重要的内容了，解析 mapper，至于mapper，相比大家再熟悉不过了
+接下来就是比较重要的内容了，因为内容很多，故单独提一个标题来说明
+
+解析 mapper，至于mapper，相比大家再熟悉不过了
 
 ```xml
 <mappers>
@@ -1177,7 +1179,7 @@ private void configurationElement(XNode context) {
 
 接下来我们一个个来看看
 
-##### 2.10.1 cacheRef节点的解析
+#### 3.1 cache-ref节点的解析
 
 ```java
 private void cacheRefElement(XNode context) {
@@ -1230,7 +1232,7 @@ public Cache useCacheRef(String namespace) {
     if (cache == null) {
       throw new IncompleteElementException("No cache for namespace '" + namespace + "' could be found.");
     }
-    //把当前的cache指向引用的namespace cache? 不知道要干啥，再往下看
+    //把当前的cache指向引用的namespace cache
     currentCache = cache;
     unresolvedCacheRef = false;
     return cache;
@@ -1241,5 +1243,318 @@ public Cache useCacheRef(String namespace) {
 }
 ```
 
-读完了整个cacheRefElement节点，一脸的懵逼，不知道他要干啥，先到这里，再往下看
+其实想想这个xml配置是干什么用的就知道了，无非就是引用其他namespace的缓存，但是要知道，第一次进来，缓存还没有生成呢？因为cacheRef节点是第一个被解析的组件，这时候configuration.getCache(namespace);肯定是空的，所以这里抛出异常，并把CacheRefResolver对象加入到configuration中去了
+
+```java
+//如果异常就加入到IncompleteCacheRef LinkedList中
+configuration.addIncompleteCacheRef(cacheRefResolver);
+```
+
+方便后续有了cache再去赋值，赋值的地方在
+
+ XMLMapperBuilder#parsePendingCacheRefs();
+
+#### 3.2 cache节点解析
+
+cache，也就是对给定命名空间的缓存配置，这里的主要讲的是二级缓存，namespace级别的，开启二级缓存，需要两个配置
+
+1. 全局开关配置
+
+```java
+<setting name="cacheEnabled" value="true"/>
+```
+
+![](mybatisimg\4.png)
+
+> 当然默认情况下cacheEnabled就是true,这在2.7节就已经说过了
+
+2. mapper配置cache节点
+
+```xml
+<cache eviction="LRU"
+       blocking="false"
+       flushInterval="60000"
+       readOnly="false"
+       size="1024"
+       type="PERPETUAL">
+   <property name="name" value="zhangsan"/>
+</cache>
+```
+
+这样二级缓存就生效了，缺一不可，在<cache>节点上，有几个参数需要注意下，他们分别代表不同的意思
+
+> 1. eviction存在如下几种表现形式（默认引用LRU）
+>     typeAliasRegistry.registerAlias("PERPETUAL", PerpetualCache.class)  PERPETUAL 永久缓存
+>     typeAliasRegistry.registerAlias("FIFO", FifoCache.class);      FIFO  先进先出的缓存方式
+>     typeAliasRegistry.registerAlias("LRU", LruCache.class);        LRU   保存最近常用的
+>     typeAliasRegistry.registerAlias("SOFT", SoftCache.class);      SOFT  软引用的缓存策略
+>     typeAliasRegistry.registerAlias("WEAK", WeakCache.class);  SOFT  弱引用的缓存策略
+>
+> 2. blocking 是否阻塞（默认是false）
+>    当指定为true时将采用BlockingCache进行封装，blocking，阻塞的意思，使用BlockingCache会在查询缓存时锁住对应的Key，
+>    如果缓存命中了则会释放对应的锁，否则会在查询数据库以后再释放锁这样可以阻止并发情况下多个线程同时查询数据，
+>    详情可参考BlockingCache的源码。
+> 3. flushInterval (默认空)
+>    （清空缓存的时间间隔）: 单位毫秒，可以被设置为任意的正整数。  默认情况是不设置，也就是没有刷新间隔，
+>    缓存仅仅调用语句时刷新
+> 4. readOnly 是否只读（默认fasle）
+>        true代表只读，这样调用者拿到的和缓存是同一个地址引用，不安全，但是性能搞
+>        fasle非只读，这样会通过缓存序列化克隆一个新的对象，安全，但是性能差，默认也是fase
+> 5. size 缓存引用对象的个数(默认1024)
+>      要记住你缓存的对象数目和你运行环境的可用内存资源数目。默认值是1024
+> 6. type:自定义缓存策略（默认PERPETUAL，采用hashMap缓存）
+>     可指定使用的缓存类，mybatis默认使用HashMap进行缓存
+
+知道了大体意思，我们来看下解析的动作
+
+```java
+cacheElement(context.evalNode("cache"));
+
+private void cacheElement(XNode context) throws Exception {
+    if (context != null) {
+        //解析type
+        String type = context.getStringAttribute("type", "PERPETUAL");
+        //通过别名去获取自定义缓存
+        Class<? extends Cache> typeClass = typeAliasRegistry.resolveAlias(type);
+        //缓存策略，默认LRU
+        String eviction = context.getStringAttribute("eviction", "LRU");
+        //通过别名去获取缓存策略
+        Class<? extends Cache> evictionClass = typeAliasRegistry.resolveAlias(eviction);
+        //获取缓存刷新节点
+        Long flushInterval = context.getLongAttribute("flushInterval");
+        //获取缓存引用最大数量
+        Integer size = context.getIntAttribute("size");
+        //是否只读，默认false，安全
+        boolean readWrite = !context.getBooleanAttribute("readOnly", false);
+        //是否阻塞
+        boolean blocking = context.getBooleanAttribute("blocking", false);
+        //获取子属性
+        Properties props = context.getChildrenAsProperties();
+        //通过builderAssistant来生成缓存
+        builderAssistant.useNewCache(typeClass, evictionClass, flushInterval, size, readWrite, blocking, props);
+    }
+}
+```
+
+通过MapperBuilderAssistant类设置缓存类MapperBuilderAssistant#useNewCache
+
+```java
+public Cache useNewCache(Class<? extends Cache> typeClass,
+    Class<? extends Cache> evictionClass,
+    Long flushInterval,
+    Integer size,
+    boolean readWrite,
+    boolean blocking,
+    Properties props) {
+  //这里cache要设置的东西比较多，而且各个缓存的成员都不确定，所以有看到Builder模式，可见mybatis的代码写的还是很不错的
+  Cache cache = new CacheBuilder(currentNamespace)
+      //如果type值是空的，就用PerpetualCache
+      .implementation(valueOrDefault(typeClass, PerpetualCache.class))
+      //加入缓存实现策略（可能存在多个），用一个list来维护cache class的
+      .addDecorator(valueOrDefault(evictionClass, LruCache.class))
+       //维护刷新时间
+      .clearInterval(flushInterval)
+      //维护缓存引用数
+      .size(size)
+      //是否只读
+      .readWrite(readWrite)
+      //是否只读
+      .blocking(blocking)
+      //维护属性
+      .properties(props)
+      //构建
+      .build();
+  //构建完了加入到configuration对象中
+  configuration.addCache(cache);
+  //并且将当前的currentCache更新成自己
+  currentCache = cache;
+  return cache;
+}
+```
+
+在这里其实build方法是关键，因为他处理了怎么样去构建该缓存的，在这里用了建造者模式，在创建的过程中，这里有用到了装饰器模式，合理的生成了一个从内向外的一个装饰缓存
+
+```java
+public Cache build() {
+  setDefaultImplementations();
+  Cache cache = newBaseCacheInstance(implementation, id);
+  setCacheProperties(cache);
+  // 只要不是自定义的日志，基本都会走到这里
+  if (PerpetualCache.class.equals(cache.getClass())) {
+    for (Class<? extends Cache> decorator : decorators) {
+      //包装策略
+      cache = newCacheDecoratorInstance(decorator, cache);
+      setCacheProperties(cache);
+    }
+    //开始包装各种实现
+    cache = setStandardDecorators(cache);
+    //如果是自定义的日志，那就值包装一次，包装成日志方式的
+  } else if (!LoggingCache.class.isAssignableFrom(cache.getClass())) {
+    cache = new LoggingCache(cache);
+  }
+  return cache;
+}
+
+ //心得，从这里可以看出mybatis的代码还是比较严谨的，就算这里在框架层来说不怎么可能为空的情况下还是设置了默认的情况，防止从其他途径来扩展使用mybatis
+ private void setDefaultImplementations() {
+    //这里实现默认是空的情况下，则设置一些默认实现，从这里看到
+    if (implementation == null) {
+      implementation = PerpetualCache.class;
+      if (decorators.isEmpty()) {
+        //如果缓存策略也没配置，这里就默认加入了LruCache，虽然默认就是LruCache
+        decorators.add(LruCache.class);
+      }
+    }
+  }
+
+private Cache setStandardDecorators(Cache cache) {
+    try {
+      //看cache有没有setSize方法，有的话就设置下最大缓存对象个数
+      MetaObject metaCache = SystemMetaObject.forObject(cache);
+      if (size != null && metaCache.hasSetter("size")) {
+        metaCache.setValue("size", size);
+      }
+       //如果存在缓存刷新时间，就继续包装成ScheduledCache
+      if (clearInterval != null) {
+        cache = new ScheduledCache(cache);
+        ((ScheduledCache) cache).setClearInterval(clearInterval);
+      }
+      //如果是读写的，就包装成SerializedCache对象
+      if (readWrite) {
+        cache = new SerializedCache(cache);
+      }
+      //继续包装LoggingCache对象
+      cache = new LoggingCache(cache);
+      //包装成线程安全的SynchronizedCache
+      cache = new SynchronizedCache(cache);
+      //如果是阻塞的就包装成BlockingCache
+      if (blocking) {
+        cache = new BlockingCache(cache);
+      }
+      //最后返回被包装的对象
+      return cache;
+    } catch (Exception e) {
+      throw new CacheException("Error building standard cache decorators.  Cause: " + e, e);
+    }
+  }
+```
+
+经过这样包装，最后包装的对象就是这样的
+
+![](mybatisimg\5.png)
+
+> *需要注意的：
+>
+>  在CacheBuilder#setCacheProperties(cache);的过程中，调用了((InitializingObject) cache).initialize();方法
+>
+> 从3.4.2版本开始，MyBatis已经支持在所有属性设置完毕以后可以调用一个初始化方法了（主要用在cache中）
+>
+> ```java
+> /**
+>  * Interface that indicate to provide a initialization method.
+>  *
+>  * @since 3.4.2
+>  */
+> public interface InitializingObject {
+> 
+>   /**
+>    * Initialize a instance.This method will be invoked after it has set all         properties.
+>    */
+>   void initialize() throws Exception;
+> 
+> }
+> ```
+
+cahce的总结：
+
+从整个二级缓存来看，mybatis对二级缓存的实现，用了建造者模式和装饰器模式，并且将包装的缓存设置到了
+
+MapperBuilderAssistant#currentCache成员中方便以后应用，然后将cache加入到了configuration对象中的一个hashmap中
+
+key - value  ===========>   cache.getId - cache
+
+#### ~~3.3 parameterMap节点的解析（这里就不展开讨论了）~~
+
+![](mybatisimg\6.png)
+
+在mybatis官网上说的很清楚
+
+已被废弃！老式风格的参数映射。更好的办法是使用内联参数，此元素可能在将来被移除
+
+#### 3.4 resultMap节点的解析
+
+resultMap可以说是mybatis的灵魂节点了，用好它，那就等于用好了mybatis的一些特殊而且很有用的功能
+
+> [在官网文档上](http://www.mybatis.org/mybatis-3/zh/sqlmap-xml.html)有这么一段话
+>
+> 外部 resultMap 的命名引用。结果集的映射是 MyBatis 最强大的特性，如果你对其理解透彻，许多复杂映射的情形都能迎刃而解。可以使用 resultMap 或 resultType，但不能同时使用。
+
+可以看到resultMap的重要性，所以我决定深入源码来理解resultMap，对resultMap做一个透彻的分析
+
+```java
+resultMapElements(context.evalNodes("/mapper/resultMap"));
+```
+
+```java
+private void resultMapElements(List<XNode> list) throws Exception {
+  //拿到所有节点，进行一个遍历 
+  for (XNode resultMapNode : list) {
+    try {
+      resultMapElement(resultMapNode);
+    } catch (IncompleteElementException e) {
+      //这里是否似曾相识，就是在cache-ref解析过程中也抛出来这个异常，等cache加载完毕再去处理一次，那这里呢？
+      // ignore, it will be retried
+    }
+  }
+}
+```
+
+XMLMapperBuilder#resultMapElement(resultMapNode);
+
+```java
+private ResultMap resultMapElement(XNode resultMapNode) throws Exception {
+  //这里我没看懂为啥EmptyList对象，又不能add操作，而且在接下里的操作中emptyList对象也没做啥操作，是不是写这块代码的人写的有问题呢？这参数写的很没水平
+  return resultMapElement(resultMapNode, Collections.<ResultMapping> emptyList());
+}
+```
+
+```java
+private ResultMap resultMapElement(XNode resultMapNode, List<ResultMapping> additionalResultMappings) throws Exception {
+  //单存的日志记录，后续专门找一张来讲解下mybaits的异常日志
+  ErrorContext.instance().activity("processing " + resultMapNode.getValueBasedIdentifier());
+  String id = resultMapNode.getStringAttribute("id",
+      resultMapNode.getValueBasedIdentifier());
+  String type = resultMapNode.getStringAttribute("type",
+      resultMapNode.getStringAttribute("ofType",
+          resultMapNode.getStringAttribute("resultType",
+              resultMapNode.getStringAttribute("javaType"))));
+  String extend = resultMapNode.getStringAttribute("extends");
+  Boolean autoMapping = resultMapNode.getBooleanAttribute("autoMapping");
+  Class<?> typeClass = resolveClass(type);
+  Discriminator discriminator = null;
+  List<ResultMapping> resultMappings = new ArrayList<ResultMapping>();
+  resultMappings.addAll(additionalResultMappings);
+  List<XNode> resultChildren = resultMapNode.getChildren();
+  for (XNode resultChild : resultChildren) {
+    if ("constructor".equals(resultChild.getName())) {
+      processConstructorElement(resultChild, typeClass, resultMappings);
+    } else if ("discriminator".equals(resultChild.getName())) {
+      discriminator = processDiscriminatorElement(resultChild, typeClass, resultMappings);
+    } else {
+      List<ResultFlag> flags = new ArrayList<ResultFlag>();
+      if ("id".equals(resultChild.getName())) {
+        flags.add(ResultFlag.ID);
+      }
+      resultMappings.add(buildResultMappingFromContext(resultChild, typeClass, flags));
+    }
+  }
+  ResultMapResolver resultMapResolver = new ResultMapResolver(builderAssistant, id, typeClass, extend, discriminator, resultMappings, autoMapping);
+  try {
+    return resultMapResolver.resolve();
+  } catch (IncompleteElementException  e) {
+    configuration.addIncompleteResultMap(resultMapResolver);
+    throw e;
+  }
+}
+```
 
