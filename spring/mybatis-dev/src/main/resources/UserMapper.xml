@@ -4,8 +4,12 @@
 <mapper namespace="com.best.dao.UserMapper">
 
     <resultMap id="user_map" type="CtUser" extends="user_map_id" autoMapping="true">
+        <constructor>
+            <arg column="id" javaType="Long" name="id"></arg>
+            <arg column="age" javaType="integer" name="age"></arg>
+            <arg column="username" javaType="String" name="username"></arg>
+        </constructor>
         <result property="username" column="username" jdbcType="VARCHAR" typeHandler="org.apache.ibatis.type.StringTypeHandler"></result>
-
     </resultMap>
 
     <resultMap id="user_map_id" type="CtUser">

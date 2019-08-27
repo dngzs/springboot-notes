@@ -1301,7 +1301,7 @@ cache，也就是对给定命名空间的缓存配置，这里的主要讲的是
 >        true代表只读，这样调用者拿到的和缓存是同一个地址引用，不安全，但是性能搞
 >        fasle非只读，这样会通过缓存序列化克隆一个新的对象，安全，但是性能差，默认也是fase
 > 5. size 缓存引用对象的个数(默认1024)
->      要记住你缓存的对象数目和你运行环境的可用内存资源数目。默认值是1024
+>        要记住你缓存的对象数目和你运行环境的可用内存资源数目。默认值是1024
 > 6. type:自定义缓存策略（默认PERPETUAL，采用hashMap缓存）
 >     可指定使用的缓存类，mybatis默认使用HashMap进行缓存
 
@@ -1522,14 +1522,19 @@ private ResultMap resultMapElement(XNode resultMapNode) throws Exception {
 private ResultMap resultMapElement(XNode resultMapNode, List<ResultMapping> additionalResultMappings) throws Exception {
   //单存的日志记录，后续专门找一张来讲解下mybaits的异常日志
   ErrorContext.instance().activity("processing " + resultMapNode.getValueBasedIdentifier());
+  //获取id字段
   String id = resultMapNode.getStringAttribute("id",
       resultMapNode.getValueBasedIdentifier());
+  //获取类型
   String type = resultMapNode.getStringAttribute("type",
       resultMapNode.getStringAttribute("ofType",
           resultMapNode.getStringAttribute("resultType",
               resultMapNode.getStringAttribute("javaType"))));
+  //获取继承的父resultMap
   String extend = resultMapNode.getStringAttribute("extends");
+  //是否自动映射
   Boolean autoMapping = resultMapNode.getBooleanAttribute("autoMapping");
+  //获取别名对应的class对象
   Class<?> typeClass = resolveClass(type);
   Discriminator discriminator = null;
   List<ResultMapping> resultMappings = new ArrayList<ResultMapping>();

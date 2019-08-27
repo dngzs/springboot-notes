@@ -1,10 +1,15 @@
 package com.best.vo;
 
+import org.apache.ibatis.annotations.Arg;
+import org.apache.ibatis.annotations.ConstructorArgs;
+import org.apache.ibatis.annotations.Param;
+
 /**
  * @author dngzs
  * @date 2019-08-23 21:00
  */
 public class CtUser {
+
 
     private Integer age;
 
@@ -12,6 +17,19 @@ public class CtUser {
 
     private String username;
 
+
+    public CtUser(Long id) {
+        this.id = id;
+    }
+
+    public CtUser() {
+    }
+
+    public CtUser(@Param("age")Integer age, @Param("id")Long id, @Param("username")String username) {
+        this.age = age;
+        this.id = id;
+        this.username = username;
+    }
 
     public Integer getAge() {
         return age;
