@@ -21,6 +21,8 @@
         <typeAlias type="com.best.vo.CtUser"/>
         <typeAlias type="com.best.po.User"/>
         <typeAlias type="com.best.po.Book"/>
+        <typeAlias type="com.best.vo.Female"/>
+        <typeAlias type="com.best.vo.Male"/>
     </typeAliases>
 
 

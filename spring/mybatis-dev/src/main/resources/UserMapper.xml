@@ -5,15 +5,21 @@
 
     <resultMap id="user_map" type="CtUser" extends="user_map_id" autoMapping="true">
         <constructor>
-            <arg column="id" javaType="Long" name="id"></arg>
             <arg column="age" javaType="integer" name="age"></arg>
+            <arg column="id" javaType="Long" name="id"></arg>
             <arg column="username" javaType="String" name="username"></arg>
         </constructor>
+        <id property="id" column="id" javaType="long" jdbcType="NUMERIC"></id>
         <result property="username" column="username" jdbcType="VARCHAR" typeHandler="org.apache.ibatis.type.StringTypeHandler"></result>
+        <discriminator javaType="int" column="sex">
+            <case value="1" resultType="female"></case>
+            <case value="0" resultType="male"></case>
+        </discriminator>
     </resultMap>
 
     <resultMap id="user_map_id" type="CtUser">
         <id property="id" column="id" javaType="long" jdbcType="NUMERIC"></id>
+        <result property="username" column="username" jdbcType="VARCHAR" typeHandler="org.apache.ibatis.type.StringTypeHandler"></result>
     </resultMap>
 
     <cache eviction="LRU"
