@@ -1726,7 +1726,7 @@ public class Discriminator {
 
 经过上面构造器和鉴别器的生成，这里最终解析到了四个节点
 
-![](C:\Users\Administrator\Desktop\springboot-notes\mybatisimg\7.png)
+![](mybatisimg\9.png)
 
 其中有两个username，上面的一个是构造器，刚才说了，构造器也当做一个resultMapp节点来处理，而鉴别器当Discriminator对象存在
 
@@ -2168,12 +2168,123 @@ mybaits的crud是从这里开始的，那我就从这里开始继续解析源码
 buildStatementFromContext(context.evalNodes("select|insert|update|delete"));
 ```
 
-```
+```java
 private void buildStatementFromContext(List<XNode> list) {
   if (configuration.getDatabaseId() != null) {
     buildStatementFromContext(list, configuration.getDatabaseId());
   }
   buildStatementFromContext(list, null);
 }
+
+private void buildStatementFromContext(List<XNode> list, String requiredDatabaseId) {
+  for (XNode context : list) {
+    //在这里生成XMLStatementBuilder开始解析sql
+    final XMLStatementBuilder statementParser = new XMLStatementBuilder(configuration, builderAssistant, context, requiredDatabaseId);
+    try {
+      //开始解析
+      statementParser.parseStatementNode();
+    } catch (IncompleteElementException e) {
+      configuration.addIncompleteStatement(statementParser);
+    }
+  }
+}
 ```
 
+接下来statementParser.parseStatementNode();就是我们看的重点，这里面包含了sql的解析过程
+
+```java
+public void parseStatementNode() {
+  //获取crud的id
+  String id = context.getStringAttribute("id");
+  String databaseId = context.getStringAttribute("databaseId");
+
+  if (!databaseIdMatchesCurrent(id, databaseId, this.requiredDatabaseId)) {
+    return;
+  }
+    
+  //获取mybaits最基本的一些信息，这些信息是我们经常写的，所以就不一一过了
+  Integer fetchSize = context.getIntAttribute("fetchSize");
+  Integer timeout = context.getIntAttribute("timeout");
+  String parameterMap = context.getStringAttribute("parameterMap");
+  String parameterType = context.getStringAttribute("parameterType");
+  Class<?> parameterTypeClass = resolveClass(parameterType);
+  String resultMap = context.getStringAttribute("resultMap");
+  String resultType = context.getStringAttribute("resultType");
+    
+ //MyBatis从3.2开始支持可插拔的脚本语言，因此你可以在插入一种语言的驱动（language driver）之后来写基于这种语言的动态 SQL 查询
+  String lang = context.getStringAttribute("lang");
+  
+  //这里如果你没有定义，那么lang值就是空的，mybaits在Configuration初始化的时候默认注册了XMLLanguageDriver.class，除了他，还注册了languageRegistry.register(RawLanguageDriver.class);
+  LanguageDriver langDriver = getLanguageDriver(lang);
+
+ 
+  Class<?> resultTypeClass = resolveClass(resultType);
+  String resultSetType = context.getStringAttribute("resultSetType");
+  //解析crud语句的类型,STATEMENT，PREPARED 或 CALLABLE 的一个。这会让 MyBatis 分别使用 Statement，PreparedStatement 或 CallableStatement，默认值：PREPARED。
+  StatementType statementType = StatementType.valueOf(context.getStringAttribute("statementType", StatementType.PREPARED.toString()));
+  ResultSetType resultSetTypeEnum = resolveResultSetType(resultSetType);
+  //解析SQL是什么类型的，目前主要有UNKNOWN, INSERT, UPDATE, DELETE, SELECT, FLUSH
+  String nodeName = context.getNode().getNodeName();
+  SqlCommandType sqlCommandType = SqlCommandType.valueOf(nodeName.toUpperCase(Locale.ENGLISH));
+  //判断是不是select节点
+  boolean isSelect = sqlCommandType == SqlCommandType.SELECT;
+   
+  //如果不是select节点，flushCache默认设置成true
+  boolean flushCache = context.getBooleanAttribute("flushCache", !isSelect);
+  
+  //select是否使用缓存
+  boolean useCache = context.getBooleanAttribute("useCache", isSelect);
+    
+  //对于嵌套查询才有用，后面在分析sql执行源码的时候，再去分析它的作用
+  boolean resultOrdered = context.getBooleanAttribute("resultOrdered", false);
+
+  // 先把sql片段中的<inclued处理了>
+  //<include refid="${user_table}">
+  XMLIncludeTransformer includeParser = new XMLIncludeTransformer(configuration, builderAssistant);
+  includeParser.applyIncludes(context.getNode());
+
+  //在处理完include后，处理SelectKey节点（）
+  processSelectKeyNodes(id, parameterTypeClass, langDriver);
+  
+  // Parse the SQL (pre: <selectKey> and <include> were parsed and removed)
+  SqlSource sqlSource = langDriver.createSqlSource(configuration, context, parameterTypeClass);
+  String resultSets = context.getStringAttribute("resultSets");
+  String keyProperty = context.getStringAttribute("keyProperty");
+  String keyColumn = context.getStringAttribute("keyColumn");
+  KeyGenerator keyGenerator;
+  String keyStatementId = id + SelectKeyGenerator.SELECT_KEY_SUFFIX;
+  keyStatementId = builderAssistant.applyCurrentNamespace(keyStatementId, true);
+  if (configuration.hasKeyGenerator(keyStatementId)) {
+    keyGenerator = configuration.getKeyGenerator(keyStatementId);
+  } else {
+    keyGenerator = context.getBooleanAttribute("useGeneratedKeys",
+        configuration.isUseGeneratedKeys() && SqlCommandType.INSERT.equals(sqlCommandType))
+        ? Jdbc3KeyGenerator.INSTANCE : NoKeyGenerator.INSTANCE;
+  }
+
+  builderAssistant.addMappedStatement(id, sqlSource, statementType, sqlCommandType,
+      fetchSize, timeout, parameterMap, parameterTypeClass, resultMap, resultTypeClass,
+      resultSetTypeEnum, flushCache, useCache, resultOrdered, 
+      keyGenerator, keyProperty, keyColumn, databaseId, langDriver, resultSets);
+}
+```
+
+
+
+
+
+
+
+这里我们知道下面这几个对象需要注意下，我们一一来看
+
+1. LanguageDriver：处理sql的语言驱动器
+
+​      我们看下继承结构
+
+
+
+
+
+1. XMLIncludeTransformer：解析<include>节点的
+
+   

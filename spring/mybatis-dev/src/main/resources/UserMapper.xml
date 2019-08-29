@@ -62,6 +62,7 @@
          from ct_user t1 where id = #{id}
     </select>
 
+
     <sql id="user"> ${alias}.age,${alias}.username,${alias}.id,${alias}.sex</sql>
 
     <select id="getWithAgeAndId" resultType="ctUser">
