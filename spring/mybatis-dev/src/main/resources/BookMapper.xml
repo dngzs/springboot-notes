@@ -6,6 +6,11 @@
 
    <cache />
 
+
+    <resultMap id="user_map" type="book" autoMapping="true">
+        <id property="id" column="id" javaType="long" jdbcType="NUMERIC"></id>
+    </resultMap>
+
     <select id="getById" resultType="book">
         select * from ct_book where id = #{id}
     </select>

@@ -1,5 +1,6 @@
 package com.best.vo;
 
+import com.best.po.Book;
 import org.apache.ibatis.annotations.Arg;
 import org.apache.ibatis.annotations.ConstructorArgs;
 import org.apache.ibatis.annotations.Param;
@@ -18,6 +19,8 @@ public class CtUser {
     private String username;
 
     private int sex;
+
+    private Book book;
 
     public CtUser(Long id) {
         this.id = id;

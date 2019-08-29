@@ -1720,7 +1720,7 @@ public class Discriminator {
 
 经过上面的处理，最后生成的鉴别器是这样的
 
-![](mybatisimg\6.png)
+![](mybatisimg\7.png)
 
 ##### 3.4.3 继续源码分析
 
@@ -1975,7 +1975,7 @@ public class ResultMap {
 }
 ```
 
-ResultMapbuild#build
+ResultMap.Builder#build
 
 ```java
 public ResultMap build() {
@@ -2023,7 +2023,6 @@ public ResultMap build() {
   }
   //---------------------------------------------------------------
   //这里会判断参数类型，参数名称等（actualParamNames，就是<arg name="username"></arg>的name字段,如果不加name字段，就默认按照字段的顺序来）
-    
   if (!constructorArgNames.isEmpty()) {
     final List<String> actualArgNames = argNamesOfMatchingConstructor(constructorArgNames);
     if (actualArgNames == null) {
@@ -2041,7 +2040,7 @@ public ResultMap build() {
       }
     });
   }
-  // lock down collections
+  // 为了防止用户修改生成的resultMap中的数据，mybaits返回一个不可以修改的resultMap给用户
   resultMap.resultMappings = Collections.unmodifiableList(resultMap.resultMappings);
   resultMap.idResultMappings = Collections.unmodifiableList(resultMap.idResultMappings);
   resultMap.constructorResultMappings = Collections.unmodifiableList(resultMap.constructorResultMappings);
@@ -2079,3 +2078,102 @@ private List<String> argNamesOfMatchingConstructor(List<String> constructorArgNa
   return null;
 }
 ```
+
+完成上面的步骤后，就基本完成了rsultMap的创建了，==最后将resultMap加入configuration中去==
+
+configuration#addResultMap(resultMap);
+
+```java
+public void addResultMap(ResultMap rm) {
+  //完成了添加之后
+  resultMaps.put(rm.getId(), rm);
+  // 检查本resultMap内的鉴别器有没有嵌套resultMap
+  checkLocallyForDiscriminatedNestedResultMaps(rm);
+  //检查所有resultMap的鉴别器有没有嵌套resultMap
+  checkGloballyForDiscriminatedNestedResultMaps(rm);
+}
+```
+
+应该来说，设置resultMap的鉴别器有没有嵌套的resultMap在解析resultMap子元素的时候就可以设置，当然放在最后统一处理也未尝不可，也不见得放在这里就一定更加清晰，只能说实现的方式有多种。
+
+最后看下生成后的截图
+
+![](C:\Users\bg317957\Desktop\springboot-notes\mybatisimg\8.png)
+
+==可以看到，基本都是一个全类名，一个简单命名，这是因为mybatis复写了hashmap,在放入的同时，放入了一个简单的key==
+
+```java
+protected static class StrictMap<V> extends HashMap<String, V>
+```
+
+到此为止，一个根resultMap的解析就完整的结束了。不得不说resutMap的实现确实是很复杂。至于用法，resultMap的用法可以说可以非常的复杂，但是用好却是不容易啊
+
+最后我们附上官网对于[resultMap的介绍](http://www.mybatis.org/mybatis-3/zh/sqlmap-xml.html)，可以看看怎么使用的
+
+##### 3.4.4  sql节点的解析
+
+sql节点的作用：用来定义可重用的 SQL 代码段
+
+```xml
+<sql id="user">age,usernmae,id</sql>
+```
+
+解析sql的源码也比较简单，来看看
+
+```java
+private void sqlElement(List<XNode> list) throws Exception {
+  if (configuration.getDatabaseId() != null) {
+    sqlElement(list, configuration.getDatabaseId());
+  }
+  sqlElement(list, null);
+}
+```
+
+```java
+private void sqlElement(List<XNode> list) throws Exception {
+  if (configuration.getDatabaseId() != null) {
+    sqlElement(list, configuration.getDatabaseId());
+  }
+  sqlElement(list, null);
+}
+```
+
+```java
+private void sqlElement(List<XNode> list, String requiredDatabaseId) throws Exception {
+  for (XNode context : list) {
+    String databaseId = context.getStringAttribute("databaseId");
+    String id = context.getStringAttribute("id");
+    id = builderAssistant.applyCurrentNamespace(id, false);
+    if (databaseIdMatchesCurrent(id, databaseId, requiredDatabaseId)) {
+      //将解析到的xml加入到sqlFragments变量中
+      sqlFragments.put(id, context);
+    }
+  }
+}
+```
+
+值得注意的是存入了
+
+XMLMapperBuilder#  Map<String, XNode> sqlFragments，这个sqlFragments其实在创建的时候就是拿的configuration的sqlFragments引用，于是这里存入就是存入了configuration的sqlFragments中去了
+
+##### 3.4.5  解析sql crud语句
+
+mybatis作为一个orm框架，那么最重要的就是增删改查了，这也是mybaits最有价值的部分，mybatis前面这些组件铺垫了这么久，就是为了这一刻。为了研究清楚mybaits对于crud的实现，我决定深入crud的源码进行详细了解不理解这一块，那么真正的使用起来只能证明你不是一个老油条，更谈不上对mybatis有深刻的理解了。
+
+这一部分，我决定用源码+图示的方法来理解最重要的一刻
+
+mybaits的crud是从这里开始的，那我就从这里开始继续解析源码
+
+```java
+buildStatementFromContext(context.evalNodes("select|insert|update|delete"));
+```
+
+```
+private void buildStatementFromContext(List<XNode> list) {
+  if (configuration.getDatabaseId() != null) {
+    buildStatementFromContext(list, configuration.getDatabaseId());
+  }
+  buildStatementFromContext(list, null);
+}
+```
+

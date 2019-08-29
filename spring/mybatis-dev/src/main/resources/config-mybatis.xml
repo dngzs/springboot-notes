@@ -8,6 +8,7 @@
         <property name="name" value="lisi"/>
         <property name="age" value="18"/>
         <property name="jdbcTypeForNull" value="OTHER"/>
+        <property name="user_table" value="user"/>
     </properties>
 
     <settings>

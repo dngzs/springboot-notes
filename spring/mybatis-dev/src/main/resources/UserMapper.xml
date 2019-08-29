@@ -11,6 +11,7 @@
         </constructor>
         <id property="id" column="id" javaType="long" jdbcType="NUMERIC"></id>
         <result property="username" column="username" jdbcType="VARCHAR" typeHandler="org.apache.ibatis.type.StringTypeHandler"></result>
+        <association property="book" select="com.best.dao.BookMapper.getById" column="id"></association>
         <discriminator javaType="int" column="sex">
             <case value="1" resultType="female"></case>
             <case value="0" resultType="male"></case>
@@ -54,8 +55,15 @@
     -->
 
     <select id="getById" resultMap="user_map">
-        select * from ct_user where id = #{id}
+        select
+         <include refid="${user_table}">
+             <property name="alias" value="t1"/>
+         </include>
+         from ct_user t1 where id = #{id}
     </select>
+
+    <sql id="user"> ${alias}.age,${alias}.username,${alias}.id,${alias}.sex</sql>
+
     <select id="getWithAgeAndId" resultType="ctUser">
          select * from ct_user where id = #{id} and age = #{age}
     </select>
