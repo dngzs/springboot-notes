@@ -1541,13 +1541,17 @@ private ResultMap resultMapElement(XNode resultMapNode, List<ResultMapping> addi
   resultMappings.addAll(additionalResultMappings);
   List<XNode> resultChildren = resultMapNode.getChildren();
   for (XNode resultChild : resultChildren) {
+     //结果映射处理构造函数
     if ("constructor".equals(resultChild.getName())) {
       processConstructorElement(resultChild, typeClass, resultMappings);
+      //鉴别器的处理
     } else if ("discriminator".equals(resultChild.getName())) {
       discriminator = processDiscriminatorElement(resultChild, typeClass, resultMappings);
     } else {
+      //处理<id> <reult>节点
       List<ResultFlag> flags = new ArrayList<ResultFlag>();
       if ("id".equals(resultChild.getName())) {
+        //如果存在id节点，就标识下
         flags.add(ResultFlag.ID);
       }
       resultMappings.add(buildResultMappingFromContext(resultChild, typeClass, flags));
@@ -1563,3 +1567,515 @@ private ResultMap resultMapElement(XNode resultMapNode, List<ResultMapping> addi
 }
 ```
 
+##### 3.4.1 constructor
+
+在<resultMap>中存在<constructor>节点，在官网中是这么描述的
+
+> constructor
+>
+>  \- 用于在实例化类时，注入结果到构造方法中
+>
+> - `idArg` - ID 参数；标记出作为 ID 的结果可以帮助提高整体性能
+> - `arg` - 将被注入到构造方法的一个普通结果
+
+他是用来处理构造函数的，具体怎么来处理的，看如下的例子
+
+```xml
+<resultMap id="user_map" type="CtUser" extends="user_map_id">
+        <constructor>
+            <arg column="id" javaType="Long" name="id"></arg>
+            <arg column="age" javaType="integer" name="age"></arg>
+            <arg column="username" javaType="String" name="username">               </arg>
+        </constructor>
+        <result property="username" column="username"></result>
+</resultMap>
+```
+
+```java
+public CtUser(@Param("age")Integer age, @Param("id")Long id, @Param("username")String username) {
+    this.age = age;
+    this.id = id;
+    this.username = username;
+}
+```
+
+为了将结果注入构造方法，MyBatis 需要通过某种方式定位相应的构造方法。上面的例子中，MyBatis 一共声明了有三个形参的的构造方法，参数类型以 `java.lang.Integer`, `java.lang.Long 和    ` `java.lang.String`的顺序给出。
+
+但是这样的体验很不要，参数的顺序要和constructor  arg的索引顺序一模一样才可以，为了解决这个问题，mybatis在从版本 3.4.3 开始，可以在==构造方法的参数上添加 `@Param` 注解==或者==使用 '-parameters' 编译选项并启用 `useActualParamName==` 选项（默认开启）来编译项目
+
+跟入构造器的解析源码
+
+```java
+processConstructorElement(resultChild, typeClass, resultMappings);
+
+ private void processConstructorElement(XNode resultChild, Class<?> resultType, List<ResultMapping> resultMappings) throws Exception {
+    List<XNode> argChildren = resultChild.getChildren();
+    //获取子属性
+    for (XNode argChild : argChildren) {
+      List<ResultFlag> flags = new ArrayList<ResultFlag>();
+      //将所有的子节点标识为构造器
+      flags.add(ResultFlag.CONSTRUCTOR);
+      //如果存在idarg节点，则标识该节点是id节点
+      if ("idArg".equals(argChild.getName())) {
+        flags.add(ResultFlag.ID);
+      }
+      //将解析到的数据加入到resultMappings中去
+      resultMappings.add(buildResultMappingFromContext(argChild, resultType, flags));
+    }
+  }
+```
+
+在下面例子中
+
+```xml
+<resultMap id="user_map" type="CtUser" extends="user_map_id" autoMapping="true">
+    <constructor>
+        <arg column="id" javaType="Long" name="id"></arg>
+        <arg column="age" javaType="integer" name="age"></arg>
+        <arg column="username" javaType="String" name="username"></arg>
+    </constructor>
+    <result property="username" column="username" jdbcType="VARCHAR" typeHandler="org.apache.ibatis.type.StringTypeHandler"></result>
+</resultMap>
+```
+
+经过该方法处理resultMappings就已经存在三个元素了，是constructor的节点，他们被当做resultMapping来处理了，只是做了标识，标识他们为CONSTRUCTOR类型的resultMapping
+
+#####  3.4.2  鉴别器discriminator
+
+鉴别器其实也算是一种映射了，这里复制下官网的介绍，因为用的不多，但是有些复杂的业务可能还会用到
+
+```xml
+discriminator javaType="int" column="draft">
+  <case value="1" resultType="DraftPost"/>
+</discriminator>
+```
+
+有时候，一个数据库查询可能会返回多个不同的结果集（但总体上还是有一定的联系的）。 鉴别器（discriminator）元素就是被设计来应对这种情况的，另外也能处理其它情况，例如类的继承层次结构。 鉴别器的概念很好理解——它很像 Java 语言中的 switch 语句。
+
+
+
+==鉴别器的处理比constructor复杂的多了==
+
+```java
+private Discriminator processDiscriminatorElement(XNode context, Class<?> resultType, List<ResultMapping> resultMappings) throws Exception {
+  //获取鉴别器上的节点信息
+  String column = context.getStringAttribute("column");
+  String javaType = context.getStringAttribute("javaType");
+  String jdbcType = context.getStringAttribute("jdbcType");
+  String typeHandler = context.getStringAttribute("typeHandler");
+  Class<?> javaTypeClass = resolveClass(javaType);
+  @SuppressWarnings("unchecked")
+  Class<? extends TypeHandler<?>> typeHandlerClass = (Class<? extends TypeHandler<?>>) resolveClass(typeHandler);
+  JdbcType jdbcTypeEnum = resolveJdbcType(jdbcType);
+  Map<String, String> discriminatorMap = new HashMap<String, String>();
+  //####2标识
+  for (XNode caseChild : context.getChildren()) {
+    String value = caseChild.getStringAttribute("value");
+    //####3标识，这里resultMap是空的，就自动生成一个标识
+    //在下面的例子中：com.best.dao.UserMapper.mapper_resultMap[user_map]_discriminator_case[1] com.best.dao.UserMapper.mapper_resultMap[user_map]_discriminator_case[0]
+    String resultMap = caseChild.getStringAttribute("resultMap", processNestedResultMappings(caseChild, resultMappings));
+    discriminatorMap.put(value, resultMap);
+  }
+  //最后生成Discriminator返回（此处的生成比较复杂，会设计到递归），因为鉴别器用的不是很多，这里就不一一看源码了
+  return builderAssistant.buildDiscriminator(resultType, column, javaTypeClass, jdbcTypeEnum, typeHandlerClass, discriminatorMap);
+}
+```
+
+```java
+public class Discriminator {
+
+  private ResultMapping resultMapping;
+  private Map<String, String> discriminatorMap;
+  //省略部分代码
+}
+```
+
+
+
+我们根据这个例子来分析下上面的源码
+
+```xml
+<resultMap id="user_map" type="CtUser" extends="user_map_id" autoMapping="true">
+        <constructor>
+            <arg column="id" javaType="Long" name="id"></arg>
+            <arg column="age" javaType="integer" name="age"></arg>
+            <arg column="username" javaType="String" name="username"></arg>
+        </constructor>
+        <result property="username" column="username" jdbcType="VARCHAR" typeHandler="org.apache.ibatis.type.StringTypeHandler"></result>
+        <discriminator javaType="int" column="sex">
+            <case value="1" resultType="female"></case>
+            <case value="0" resultType="male"></case>
+        </discriminator>
+    </resultMap>
+```
+
+在上面代码中的==####2==标识处获取到两个子节点
+
+```java
+<case value="1" resultType="female"></case>
+<case value="0" resultType="male"></case>
+```
+
+因为在case标签上也可以存在，所以在==####3==标识处
+
+经过上面的处理，最后生成的鉴别器是这样的
+
+![](mybatisimg\6.png)
+
+##### 3.4.3 继续源码分析
+
+经过上面构造器和鉴别器的生成，这里最终解析到了四个节点
+
+![](C:\Users\Administrator\Desktop\springboot-notes\mybatisimg\7.png)
+
+其中有两个username，上面的一个是构造器，刚才说了，构造器也当做一个resultMapp节点来处理，而鉴别器当Discriminator对象存在
+
+在这里一个resultMap节点的信息算是解析完了，下来就是组装解析到的数据
+
+```java
+ResultMapResolver resultMapResolver = new ResultMapResolver(builderAssistant, id, typeClass, extend, discriminator, resultMappings, autoMapping);
+try {
+  return resultMapResolver.resolve();
+} catch (IncompleteElementException  e) {
+  configuration.addIncompleteResultMap(resultMapResolver);
+  throw e;
+}
+```
+
+这里用ResultMapResolver去解析
+
+```java
+public class ResultMapResolver {
+  //MapperBuilderAssistant对象我们分析过，存着当前namespace的缓存，id以及mapper文件的存在的路径
+  private final MapperBuilderAssistant assistant;
+  //ResultMap的id属性
+  private final String id;
+  //ResultMap的type类型
+  private final Class<?> type;
+  ////ResultMap的继承情况
+  private final String extend;
+  //鉴别器
+  private final Discriminator discriminator;
+  //子节点的ResultMapping对象
+  private final List<ResultMapping> resultMappings;
+  //是否自动映射
+  private final Boolean autoMapping;
+
+  public ResultMap resolve() {
+    //通过mapper的助理对象去解析ResultMap
+    return assistant.addResultMap(this.id, this.type, this.extend, this.discriminator, this.resultMappings, this.autoMapping);
+  }
+
+}
+```
+
+resultMapResolver#resolve()去解析
+
+```java
+public ResultMap addResultMap(
+    String id,
+    Class<?> type,
+    String extend,
+    Discriminator discriminator,
+    List<ResultMapping> resultMappings,
+    Boolean autoMapping) {
+  //获取ResultMapId（这里拿到的都是namespace.id）
+  id = applyCurrentNamespace(id, false);
+  //获取继承（这里拿到的都是namespace.extend）
+  extend = applyCurrentNamespace(extend, true);
+  //如果继承不是空，去处理继承
+  if (extend != null) {
+     //一般第一次进来都是空的，和cache-ref的处理方式一样，直接抛异常
+    if (!configuration.hasResultMap(extend)) {
+      throw new IncompleteElementException("Could not find a parent resultmap with id '" + extend + "'");
+    }
+    ResultMap resultMap = configuration.getResultMap(extend);
+    List<ResultMapping> extendedResultMappings = new ArrayList<ResultMapping>(resultMap.getResultMappings());
+    extendedResultMappings.removeAll(resultMappings);
+    // Remove parent constructor if this resultMap declares a constructor.
+    boolean declaresConstructor = false;
+    for (ResultMapping resultMapping : resultMappings) {
+      if (resultMapping.getFlags().contains(ResultFlag.CONSTRUCTOR)) {
+        declaresConstructor = true;
+        break;
+      }
+    }
+    if (declaresConstructor) {
+      Iterator<ResultMapping> extendedResultMappingsIter = extendedResultMappings.iterator();
+      while (extendedResultMappingsIter.hasNext()) {
+        if (extendedResultMappingsIter.next().getFlags().contains(ResultFlag.CONSTRUCTOR)) {
+          extendedResultMappingsIter.remove();
+        }
+      }
+    }
+    resultMappings.addAll(extendedResultMappings);
+  }
+  ResultMap resultMap = new ResultMap.Builder(configuration, id, type, resultMappings, autoMapping)
+      .discriminator(discriminator)
+      .build();
+  configuration.addResultMap(resultMap);
+  return resultMap;
+}
+```
+
+```java
+
+try {
+      return resultMapResolver.resolve();
+    } catch (IncompleteElementException  e) {
+      //然后将没有加载完成的resultMap放入到configuration的incompleteResultMaps中去，该变量是个LinkedList类型的
+      configuration.addIncompleteResultMap(resultMapResolver);
+      throw e;
+    }
+```
+
+```xml
+<resultMap id="user_map" type="CtUser" extends="user_map_id" autoMapping="true">
+    <constructor>
+        <arg column="id" javaType="Long" name="id"></arg>
+        <arg column="age" javaType="integer" name="age"></arg>
+        <arg column="username" javaType="String" name="username"></arg>
+    </constructor>
+    <result property="username" column="username" jdbcType="VARCHAR" typeHandler="org.apache.ibatis.type.StringTypeHandler"></result>
+    <discriminator javaType="int" column="sex">
+        <case value="1" resultType="female"></case>
+        <case value="0" resultType="male"></case>
+    </discriminator>
+</resultMap>
+
+<resultMap id="user_map_id" type="CtUser">
+    <id property="id" column="id" javaType="long" jdbcType="NUMERIC"></id>
+</resultMap>
+```
+
+解析到这里，user_map因为在最上面，所以先解析的user_map，而他继承的user_map_id在下面，所以会抛出异常，将user_map加入到configuration的incompleteResultMaps变量中去，代表着是个半成品的resultMap
+
+接下来就去加载user_map_id去了，和上面的代码同一个思路，这里就不多做分析了
+
+那么到底在什么时候才能加载并处理完半成品呢
+
+```java
+public void parse() {
+  if (!configuration.isResourceLoaded(resource)) {
+    configurationElement(parser.evalNode("/mapper"));
+    configuration.addLoadedResource(resource);
+    bindMapperForNamespace();
+  }
+  //是的在这里处理了半成品ResultMap
+  parsePendingResultMaps();
+  //还记得在这里处理了半成品CacheRef吗
+  parsePendingCacheRefs();
+  parsePendingStatements();
+}
+```
+
+```java
+private void parsePendingResultMaps() {
+  //拿到半成品，遍历
+  Collection<ResultMapResolver> incompleteResultMaps = configuration.getIncompleteResultMaps();
+  synchronized (incompleteResultMaps) {
+    Iterator<ResultMapResolver> iter = incompleteResultMaps.iterator();
+    while (iter.hasNext()) {
+      try {
+        //还是调用ResultMapResolver的resolve方法去处理的，和上面的CacheRefResolver处理cache-ref一个套路，经过MapperBuilderAssistant去处理，这样就又回到上面的代码
+        iter.next().resolve();
+        iter.remove();
+      } catch (IncompleteElementException e) {
+        // ResultMap is still missing a resource...
+      }
+    }
+  }
+}
+```
+
+不妨在把上面的代码复制下来
+
+```java
+public ResultMap addResultMap(
+    String id,
+    Class<?> type,
+    String extend,
+    Discriminator discriminator,
+    List<ResultMapping> resultMappings,
+    Boolean autoMapping) {
+  //获取ResultMapId（这里拿到的都是namespace.id）
+  id = applyCurrentNamespace(id, false);
+  //获取继承（这里拿到的都是namespace.extend）
+  extend = applyCurrentNamespace(extend, true);
+  //如果继承不是空，去处理继承
+  if (extend != null) {
+     //在这里，经过上面哪一个步骤，已经这里存在了hasResultMap了
+    if (!configuration.hasResultMap(extend)) {
+      throw new IncompleteElementException("Could not find a parent resultmap with id '" + extend + "'");
+    }
+    //获取到继承的ResultMap
+    ResultMap resultMap = configuration.getResultMap(extend);
+    //这里会做一个去重，将子类的resultMap和父类的resultMap的子节点相同的元素一出掉
+    List<ResultMapping> extendedResultMappings = new ArrayList<ResultMapping>(resultMap.getResultMappings());
+    extendedResultMappings.removeAll(resultMappings);
+    //这里会去除掉父类的CONSTRUCTOR节点
+    boolean declaresConstructor = false;
+    for (ResultMapping resultMapping : resultMappings) {
+      if (resultMapping.getFlags().contains(ResultFlag.CONSTRUCTOR)) {
+        declaresConstructor = true;
+        break;
+      }
+    }
+    if (declaresConstructor) {
+      Iterator<ResultMapping> extendedResultMappingsIter = extendedResultMappings.iterator();
+      while (extendedResultMappingsIter.hasNext()) {
+        if (extendedResultMappingsIter.next().getFlags().contains(ResultFlag.CONSTRUCTOR)) {
+          extendedResultMappingsIter.remove();
+        }
+      }
+    }
+    //然后加入到resultMappings
+    resultMappings.addAll(extendedResultMappings);
+  }
+  ResultMap resultMap = new ResultMap.Builder(configuration, id, type, resultMappings, autoMapping)
+      .discriminator(discriminator)
+      //在这里用了build模式
+      .build();
+  //加入configuration中
+  configuration.addResultMap(resultMap);
+  return resultMap;
+}
+```
+
+ResultMap对象
+
+```java
+public class ResultMap {
+  private Configuration configuration;
+  //ResultMap id
+  private String id;
+  //类型
+  private Class<?> type;
+  //子节点id ruslt,包括构造器
+  private List<ResultMapping> resultMappings;
+  //id  ResultMappings
+  private List<ResultMapping> idResultMappings;
+  //构造器ResultMappings
+  private List<ResultMapping> constructorResultMappings;
+  //除了constructor剩下的都是propertyResult，包括id  ResultMapping
+  private List<ResultMapping> propertyResultMappings;
+  //所有子节点的column属性字段值
+  private Set<String> mappedColumns;
+  //所有子节点的property属性字段值 
+  private Set<String> mappedProperties;
+  //鉴别器
+  private Discriminator discriminator;
+  //是否嵌套的ResultMaps
+  private boolean hasNestedResultMaps;
+  //是否是检讨查询
+  private boolean hasNestedQueries;
+  //是否自动映射
+  private Boolean autoMapping;
+  //省略部分源码
+}
+```
+
+ResultMapbuild#build
+
+```java
+public ResultMap build() {
+  if (resultMap.id == null) {
+    throw new IllegalArgumentException("ResultMaps must have an id");
+  }
+  resultMap.mappedColumns = new HashSet<String>();
+  resultMap.mappedProperties = new HashSet<String>();
+  resultMap.idResultMappings = new ArrayList<ResultMapping>();
+  resultMap.constructorResultMappings = new ArrayList<ResultMapping>();
+  resultMap.propertyResultMappings = new ArrayList<ResultMapping>();
+  final List<String> constructorArgNames = new ArrayList<String>();
+  for (ResultMapping resultMapping : resultMap.resultMappings) {
+    resultMap.hasNestedQueries = resultMap.hasNestedQueries || resultMapping.getNestedQueryId() != null;
+    resultMap.hasNestedResultMaps = resultMap.hasNestedResultMaps || (resultMapping.getNestedResultMapId() != null && resultMapping.getResultSet() == null);
+    final String column = resultMapping.getColumn();
+    if (column != null) {
+      resultMap.mappedColumns.add(column.toUpperCase(Locale.ENGLISH));
+    } else if (resultMapping.isCompositeResult()) {
+      for (ResultMapping compositeResultMapping : resultMapping.getComposites()) {
+        final String compositeColumn = compositeResultMapping.getColumn();
+        if (compositeColumn != null) {
+          resultMap.mappedColumns.add(compositeColumn.toUpperCase(Locale.ENGLISH));
+        }
+      }
+    }
+    final String property = resultMapping.getProperty();
+    if(property != null) {
+      resultMap.mappedProperties.add(property);
+    }
+    if (resultMapping.getFlags().contains(ResultFlag.CONSTRUCTOR)) {
+      resultMap.constructorResultMappings.add(resultMapping);
+      if (resultMapping.getProperty() != null) {
+        constructorArgNames.add(resultMapping.getProperty());
+      }
+    } else {
+      resultMap.propertyResultMappings.add(resultMapping);
+    }
+    if (resultMapping.getFlags().contains(ResultFlag.ID)) {
+      resultMap.idResultMappings.add(resultMapping);
+    }
+  }
+  if (resultMap.idResultMappings.isEmpty()) {
+    resultMap.idResultMappings.addAll(resultMap.resultMappings);
+  }
+  //---------------------------------------------------------------
+  //这里会判断参数类型，参数名称等（actualParamNames，就是<arg name="username"></arg>的name字段,如果不加name字段，就默认按照字段的顺序来）
+    
+  if (!constructorArgNames.isEmpty()) {
+    final List<String> actualArgNames = argNamesOfMatchingConstructor(constructorArgNames);
+    if (actualArgNames == null) {
+      throw new BuilderException("Error in result map '" + resultMap.id
+          + "'. Failed to find a constructor in '"
+          + resultMap.getType().getName() + "' by arg names " + constructorArgNames
+          + ". There might be more info in debug log.");
+    }
+    Collections.sort(resultMap.constructorResultMappings, new Comparator<ResultMapping>() {
+      @Override
+      public int compare(ResultMapping o1, ResultMapping o2) {
+        int paramIdx1 = actualArgNames.indexOf(o1.getProperty());
+        int paramIdx2 = actualArgNames.indexOf(o2.getProperty());
+        return paramIdx1 - paramIdx2;
+      }
+    });
+  }
+  // lock down collections
+  resultMap.resultMappings = Collections.unmodifiableList(resultMap.resultMappings);
+  resultMap.idResultMappings = Collections.unmodifiableList(resultMap.idResultMappings);
+  resultMap.constructorResultMappings = Collections.unmodifiableList(resultMap.constructorResultMappings);
+  resultMap.propertyResultMappings = Collections.unmodifiableList(resultMap.propertyResultMappings);
+  resultMap.mappedColumns = Collections.unmodifiableSet(resultMap.mappedColumns);
+  return resultMap;
+}
+```
+
+在上述代码中，----上面的代码就不看了，就是给ResultMap赋值的，主要来看下构造器的参数映射部分的代码
+
+```java
+final List<String> actualArgNames = argNamesOfMatchingConstructor(constructorArgNames);
+```
+
+ResultMap#argNamesOfMatchingConstructor
+
+```java
+private List<String> argNamesOfMatchingConstructor(List<String> constructorArgNames) {
+  //获取ResultMap类型的所有public的构造方法
+  Constructor<?>[] constructors = resultMap.type.getDeclaredConstructors();
+  for (Constructor<?> constructor : constructors) {
+    Class<?>[] paramTypes = constructor.getParameterTypes();
+    //如果参数个数相同，继续分析
+    if (constructorArgNames.size() == paramTypes.length) {
+      List<String> paramNames = getArgNames(constructor);
+       //判断constructorArgNames是否都在参数名称里并且
+        
+      if (constructorArgNames.containsAll(paramNames)
+          && argTypesMatch(constructorArgNames, paramTypes, paramNames)) {
+        return paramNames;
+      }
+    }
+  }
+  return null;
+}
+```

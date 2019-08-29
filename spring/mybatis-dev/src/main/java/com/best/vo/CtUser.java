@@ -17,6 +17,7 @@ public class CtUser {
 
     private String username;
 
+    private int sex;
 
     public CtUser(Long id) {
         this.id = id;
@@ -24,6 +25,11 @@ public class CtUser {
 
     public CtUser() {
     }
+
+    public CtUser(Integer age) {
+        this.age = age;
+    }
+
 
     public CtUser(@Param("age")Integer age, @Param("id")Long id, @Param("username")String username) {
         this.age = age;
@@ -53,6 +59,14 @@ public class CtUser {
 
     public void setUsername(String username) {
         this.username = username;
+    }
+
+    public int getSex() {
+        return sex;
+    }
+
+    public void setSex(int sex) {
+        this.sex = sex;
     }
 
     @Override
