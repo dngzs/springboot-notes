@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
+import org.springframework.web.bind.annotation.GetMapping;
 
 import java.util.Arrays;
 import java.util.List;
@@ -34,6 +35,7 @@ public class UserServiceImpl implements UserService {
 
 
     @TransactionalEventListener(phase=TransactionPhase.AFTER_COMMIT)
+    @GetMapping(name = "ceshi")
     public void beforeCommit(SmsEvent<SmsVo> event) {
         SmsVo smsVo = (SmsVo) event.getSource();
         System.out.println("########################");
