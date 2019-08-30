@@ -23,7 +23,7 @@ public class App {
         User query = new User();
         query.setAge(18);
         query.setId(1L);
-        CtUser user = mapper.getById(1l);
+        CtUser user = mapper.getWithAgeAndId(1l,2);
         System.out.println(user);
 
         BookMapper bookMapper = sqlSession.getMapper(BookMapper.class);

@@ -2271,15 +2271,769 @@ public void parseStatementNode() {
 
 
 
-
-
-
-
 这里我们知道下面这几个对象需要注意下，我们一一来看
+
+###### 3.4.5.1 LanguageDriver
 
 1. LanguageDriver：处理sql的语言驱动器
 
 ​      我们看下继承结构
+
+![](mybatisimg\10.png)
+
+语言驱动器非常重要，在mybait中，默认情况下使用的XMLLanguageDriver驱动器，如果你觉得mybaits的语言驱动器不好用，那么可以自定义，这就是mybaits留给你的扩展
+
+而RawLanguageDriver驱动器是继承自XMLLanguageDriver，作用就是检查如果sql语句存在动态语句，直接抛异常，除此之外，mybaits还提供了一些驱动，有兴趣可以去看看，官方地址[戳这里](https://github.com/mybatis)
+
+![](mybatisimg\11.png)
+
+话不多说，既然默认的是XMLLanguageDriver，那么我们就看看mybaits是怎么解析sql语句的，这里就是重点了
+
+XMLLanguageDriver#createSqlSource
+
+```java
+@Override
+public SqlSource createSqlSource(Configuration configuration, XNode script, Class<?> parameterType) {
+  XMLScriptBuilder builder = new XMLScriptBuilder(configuration, script, parameterType);
+  return builder.parseScriptNode();
+}
+```
+
+mybaits通过XMLScriptBuilder来解析sql语句，在XMLScriptBuilder的初始化阶段，就调用了==initNodeHandlerMap==方法，初始化了解析的一些动态的标签的NodeHandler，并且每个NodeHandler都有自己对应的SqlNode，比如 IfHandler---对应IfSqlNode，为了防止外部使用，mybaits将所有的NodeHandler全部设置成了私有的，并且是在XMLScriptBuilder的私有内部类
+
+```java
+public class XMLScriptBuilder extends BaseBuilder {
+
+  private final XNode context;
+  private boolean isDynamic;
+  private final Class<?> parameterType;
+  private final Map<String, NodeHandler> nodeHandlerMap = new HashMap<String, NodeHandler>();
+
+  public XMLScriptBuilder(Configuration configuration, XNode context, Class<?> parameterType) {
+    super(configuration);
+    this.context = context;
+    this.parameterType = parameterType;
+    initNodeHandlerMap();
+  }
+  //将各个NodeHandler初始化，放入map中
+  private void initNodeHandlerMap() {
+    nodeHandlerMap.put("trim", new TrimHandler());
+    nodeHandlerMap.put("where", new WhereHandler());
+    nodeHandlerMap.put("set", new SetHandler());
+    nodeHandlerMap.put("foreach", new ForEachHandler());
+    nodeHandlerMap.put("if", new IfHandler());
+    nodeHandlerMap.put("choose", new ChooseHandler());
+    nodeHandlerMap.put("when", new IfHandler());
+    nodeHandlerMap.put("otherwise", new OtherwiseHandler());
+    nodeHandlerMap.put("bind", new BindHandler());
+  }
+
+
+
+  private class IfHandler implements NodeHandler {
+    public IfHandler() {
+      // Prevent Synthetic Access
+    }
+
+    @Override
+    public void handleNode(XNode nodeToHandle, List<SqlNode> targetContents) {
+      MixedSqlNode mixedSqlNode = parseDynamicTags(nodeToHandle);
+      String test = nodeToHandle.getStringAttribute("test");
+      IfSqlNode ifSqlNode = new IfSqlNode(mixedSqlNode, test);
+      targetContents.add(ifSqlNode);
+    }
+  }
+//省略大部分代码
+
+}
+```
+
+准备工作做好了，开始解析XMLScriptBuilder#parseScriptNode()
+
+```java
+public SqlSource parseScriptNode() {
+  //可以看到parseDynamicTags之后会生成一个MixedSqlNode，而MixedSqlNode存放了一系列的SqlNode
+  MixedSqlNode rootSqlNode = parseDynamicTags(context);
+  SqlSource sqlSource = null;
+  if (isDynamic) {
+    sqlSource = new DynamicSqlSource(configuration, rootSqlNode);
+  } else {
+    sqlSource = new RawSqlSource(configuration, rootSqlNode, parameterType);
+  }
+  return sqlSource;
+}
+```
+
+来看下mixedSqlNode怎么解析出来的
+
+XMLScriptBuilder#parseDynamicTags()
+
+```java
+protected MixedSqlNode parseDynamicTags(XNode node) {
+  //初始化一个sqlnode的list，这是生成MixedSqlNode的根本
+  List<SqlNode> contents = new ArrayList<SqlNode>();
+  //拿到select节点下的所有节点，开始遍历
+  NodeList children = node.getNode().getChildNodes();
+  for (int i = 0; i < children.getLength(); i++) {
+    XNode child = node.newXNode(children.item(i));
+     //判断子节点是不是cdate或者是text类型的
+    if (child.getNode().getNodeType() == Node.CDATA_SECTION_NODE || child.getNode().getNodeType() == Node.TEXT_NODE) {
+      //拿到sql语句
+      String data = child.getStringBody("");
+      //将解析到的sql放入TextSqlNode中（TextSqlNode算是sqlNode中实现比较复杂的一个了）
+      TextSqlNode textSqlNode = new TextSqlNode(data);
+      //解析是不是动态sql（判断是不是动态sql的标准是sql中存在${}否）
+      if (textSqlNode.isDynamic()) {
+        //如果是动态的，就将isDynamic标识，一条是动态sql，那么这个select下的sql就是动态的了
+        contents.add(textSqlNode);
+        isDynamic = true;
+      } else {
+        //如果不是就包装成一个静态sql(这里的data是解析到的sql语句)添加到contents中去
+        contents.add(new StaticTextSqlNode(data));
+      }
+      //如果sql中存在<if><where><trim>等等的标签，那么走的下面
+    } else if (child.getNode().getNodeType() == Node.ELEMENT_NODE) { // issue #628
+       //获取是什么类型的标签（假设这里获取到的是if标签）
+      String nodeName = child.getNode().getNodeName();
+      //还记得我们在初始化XMLScriptBuilder的时候，往nodeHandlerMap丢入的各种NodeHandler吗，根据名字拿出来，那么这里拿到的就是IfHandler
+      NodeHandler handler = nodeHandlerMap.get(nodeName);
+      if (handler == null) {
+        throw new BuilderException("Unknown element <" + nodeName + "> in SQL statement.");
+      }
+      //处理,跳到2.3.5.3节，看是怎么处理的
+      handler.handleNode(child, contents);
+      //如果sql中存在一些标签，我们也认为这个sql是动动态的，标注起来
+      isDynamic = true;
+    }
+  }
+  //最后再封装成一个MixedSqlNode sqlNode返回获取
+  return new MixedSqlNode(contents);
+}
+```
+
+这里我们总结下，其实select下的sql我们在写的时候是比较复杂的，可能会存在多种多样的形式，比如加了<if><where><choose>等等的标签，所以解析的过程要不断的递归，最后得到一个MixedSqlNode返回回去，这里用到了sqlNode和NodeHandler两个接口，NodeHandler处理怎么生成sqlNode，并将其加入到MixedSqlNode后返回，而MixedSqlNode我们知道，成员是一个List<SqlNode>，来存放整个select节点遍历完的所有节点经过NodeHandler处理返回的sqlNode的一个集合，拿到这个集合。在这里有个知识点：
+
+判断动态sql的标准：
+
+1. 有没有${}
+2. sql中有没有<if><where>..等等的标签
+
+二者其中有一个是就是动态sql
+
+在接着看，搬过来上面的代码
+
+```java
+public SqlSource parseScriptNode() {
+  //可以看到parseDynamicTags之后会生成一个MixedSqlNode，而MixedSqlNode存放了一系列的SqlNode
+  MixedSqlNode rootSqlNode = parseDynamicTags(context);
+  SqlSource sqlSource = null;
+  //如果是动态的sql就生成一个DynamicSqlSource
+  if (isDynamic) {
+    sqlSource = new DynamicSqlSource(configuration, rootSqlNode);
+  } else {
+    //如果是动态的就生成一个RawSqlSource
+    sqlSource = new RawSqlSource(configuration, rootSqlNode, parameterType);
+  }
+  return sqlSource;
+}
+```
+
+
+
+###### 3.4.5.2  sqlNode（sql节点的接口）
+
+这里又一个很重要的接口sqlNode,下面这是sqlNode的实现
+
+> StaticTextSqlNode (org.apache.ibatis.scripting.xmltags)
+> MixedSqlNode (org.apache.ibatis.scripting.xmltags)
+> TextSqlNode (org.apache.ibatis.scripting.xmltags)
+> ForEachSqlNode (org.apache.ibatis.scripting.xmltags)
+> IfSqlNode (org.apache.ibatis.scripting.xmltags)
+> VarDeclSqlNode (org.apache.ibatis.scripting.xmltags)
+> TrimSqlNode (org.apache.ibatis.scripting.xmltags)
+>     WhereSqlNode (org.apache.ibatis.scripting.xmltags)
+>     SetSqlNode (org.apache.ibatis.scripting.xmltags)
+> ChooseSqlNode (org.apache.ibatis.scripting.xmltags)
+
+
+
+**MixedSqlNode**
+
+```java
+public class MixedSqlNode implements SqlNode {
+ 
+  private final List<SqlNode> contents;
+
+  public MixedSqlNode(List<SqlNode> contents) {
+    this.contents = contents;
+  }
+
+  @Override
+  public boolean apply(DynamicContext context) {
+    for (SqlNode sqlNode : contents) {
+      sqlNode.apply(context);
+    }
+    return true;
+  }
+}
+```
+
+**TextSqlNode**
+
+```java
+public class TextSqlNode implements SqlNode {
+  private String text;
+
+  public TextSqlNode(String text) {
+    this.text = text;
+  }
+  //判断是不是动态sql,用的GenericTokenParser来解析的，后面会有这些工具的介绍和详解
+  public boolean isDynamic() {
+    DynamicCheckerTokenParser checker = new DynamicCheckerTokenParser();
+    GenericTokenParser parser = createParser(checker);
+    parser.parse(text);
+    return checker.isDynamic();
+  }
+
+  public boolean apply(DynamicContext context) {
+    
+    GenericTokenParser parser = createParser(new BindingTokenParser(context));
+    context.appendSql(parser.parse(text));
+    return true;
+  }
+  
+  private GenericTokenParser createParser(TokenHandler handler) {
+    //判断是不是动态的标准是有没有${}
+    return new GenericTokenParser("${", "}", handler);
+  }
+
+  private static class BindingTokenParser implements TokenHandler {
+
+    private DynamicContext context;
+
+    public BindingTokenParser(DynamicContext context) {
+      this.context = context;
+    }
+
+    public String handleToken(String content) {
+      Object parameter = context.getBindings().get("_parameter");
+      if (parameter == null) {
+        context.getBindings().put("value", null);
+      } else if (SimpleTypeRegistry.isSimpleType(parameter.getClass())) {
+        context.getBindings().put("value", parameter);
+      }
+      Object value = OgnlCache.getValue(content, context.getBindings());
+      return (value == null ? "" : String.valueOf(value)); // issue #274 return "" instead of "null"
+    }
+  }
+
+  private static class DynamicCheckerTokenParser implements TokenHandler {
+    //就存了一份是不是动态的标识
+    private boolean isDynamic;
+
+    public boolean isDynamic() {
+      return isDynamic;
+    }
+
+    public String handleToken(String content) {
+      this.isDynamic = true;
+      return null;
+    }
+  }
+  
+}
+```
+
+**StaticTextSqlNode**
+
+```java
+public class StaticTextSqlNode implements SqlNode {
+  //sql语句
+  private final String text;
+
+  public StaticTextSqlNode(String text) {
+    this.text = text;
+  }
+
+  @Override
+  public boolean apply(DynamicContext context) {
+    //通过DynamicContext#appendSql将sql拼接起来
+    context.appendSql(text);
+    return true;
+  }
+
+}
+```
+
+**IfSqlNode**
+
+```java
+public class IfSqlNode implements SqlNode {
+ 
+  private ExpressionEvaluator evaluator;
+  //test的值
+  private String test;
+  //if里面解析到的sql（这里的sqlNode一般是MixedSqlNode类型的，我们知道MixedSqlNode是个list）
+  private SqlNode contents;
+
+  public IfSqlNode(SqlNode contents, String test) {
+    this.test = test;
+    this.contents = contents;
+    //初始化的时候并且生成ognl处理类ExpressionEvaluator,可见test的值是用正则处理的，也就是test里可以写正则表达式
+    this.evaluator = new ExpressionEvaluator();
+  }
+
+  public boolean apply(DynamicContext context) {
+    if (evaluator.evaluateBoolean(test, context.getBindings())) {
+      contents.apply(context);
+      return true;
+    }
+    return false;
+  }
+
+}
+```
+
+
+
+###### 2.3.5.3 NodeHandler（生成sql节点的接口）
+
+![](mybatisimg\12.png)
+
+**IfHandler**
+
+```java
+private class IfHandler implements NodeHandler {
+  public IfHandler() {
+    // Prevent Synthetic Access
+  }
+
+  @Override
+  public void handleNode(XNode nodeToHandle, List<SqlNode> targetContents) {
+    //又去XMLScriptBuilder#parseDynamicTags递归解析一次，直到解析<if>标签解析到干净的sql
+    MixedSqlNode mixedSqlNode = parseDynamicTags(nodeToHandle);
+    //获取test属性值
+    String test = nodeToHandle.getStringAttribute("test");
+    //将test属性值和生成sql语句包装成IfSqlNode
+    IfSqlNode ifSqlNode = new IfSqlNode(mixedSqlNode, test);
+    //加入到targetContents去中
+    targetContents.add(ifSqlNode);
+  }
+}
+```
+
+###### 2.3.5.4 SqlSource接口（sql的表述）
+
+> ProviderSqlSource (org.apache.ibatis.builder.annotation)
+> StaticSqlSource (org.apache.ibatis.builder)
+> DynamicSqlSource (org.apache.ibatis.scripting.xmltags)
+> BoundSqlSqlSource in PaginationInterceptor (com.oasis.captain.dao.core.plugin.pagination)
+> RawSqlSource (org.apache.ibatis.scripting.defaults)
+
+**DynamicSqlSource**
+
+```java
+public class DynamicSqlSource implements SqlSource {
+
+ 
+  private final Configuration configuration;
+  //生成的SqlNode集合（一般是MixedSqlNode对象）
+  private final SqlNode rootSqlNode;
+
+  //很简单，就保存到成员里
+  public DynamicSqlSource(Configuration configuration, SqlNode rootSqlNode) {
+    this.configuration = configuration;
+    this.rootSqlNode = rootSqlNode;
+  }
+
+  @Override
+  public BoundSql getBoundSql(Object parameterObject) {
+    DynamicContext context = new DynamicContext(configuration, parameterObject);
+    rootSqlNode.apply(context);
+    SqlSourceBuilder sqlSourceParser = new SqlSourceBuilder(configuration);
+    Class<?> parameterType = parameterObject == null ? Object.class : parameterObject.getClass();
+    SqlSource sqlSource = sqlSourceParser.parse(context.getSql(), parameterType, context.getBindings());
+    BoundSql boundSql = sqlSource.getBoundSql(parameterObject);
+    for (Map.Entry<String, Object> entry : context.getBindings().entrySet()) {
+      boundSql.setAdditionalParameter(entry.getKey(), entry.getValue());
+    }
+    return boundSql;
+  }
+
+}
+```
+
+**RawSqlSource**
+
+```java
+/**
+ * 静态sql. 他比 {@link DynamicSqlSource}要快，因为在项目启动的时候他已经拿到sql语句了
+ * 
+ * @since 3.2.0（从这个版本，看的出来绝对是优化的，因为静态sql根本不需要去计算，启动的时候就可以拿到，加快sql效率）
+ */
+public class RawSqlSource implements SqlSource {
+
+  //经过SqlSourceBuilder的解析这里最终拿到的是一个经过处理的（带问号的，并且有参数映射的）StaticSqlSource
+  private final SqlSource sqlSource;
+
+  public RawSqlSource(Configuration configuration, SqlNode rootSqlNode, Class<?> parameterType) {
+    //通过getSql拿到sql
+    this(configuration, getSql(configuration, rootSqlNode), parameterType);
+  }
+
+  public RawSqlSource(Configuration configuration, String sql, Class<?> parameterType) {
+    //生成SqlSourceBuilder
+    SqlSourceBuilder sqlSourceParser = new SqlSourceBuilder(configuration);
+    //获取参数类型，如果是空的，就放入object.class
+    Class<?> clazz = parameterType == null ? Object.class : parameterType;
+    sqlSource = sqlSourceParser.parse(sql, clazz, new HashMap<String, Object>());
+  }
+
+  private static String getSql(Configuration configuration, SqlNode rootSqlNode) {
+    //通过DynamicContext来获取sql
+    DynamicContext context = new DynamicContext(configuration, null);
+    //SqlNode来拼接sql到DynamicContext中
+    rootSqlNode.apply(context);
+    //拿到sql
+    return context.getSql();
+  }
+
+  @Override
+  public BoundSql getBoundSql(Object parameterObject) {
+    return sqlSource.getBoundSql(parameterObject);
+  }
+
+}
+```
+
+静态sql，在mybaits启动的时候就已经获取到sql了
+
+
+
+**StaticSqlSource**
+
+处理完的sql都会生成StaticSqlSource，不管静态的sql还是动态的sql
+
+```java
+public class StaticSqlSource implements SqlSource {
+  //最终的sql语句
+  private final String sql;
+  //参数映射（此处是参数的描述信息，比如字段名、javatype jdbcType等等）
+  private final List<ParameterMapping> parameterMappings;
+  //Configuration对象
+  private final Configuration configuration;
+
+  public StaticSqlSource(Configuration configuration, String sql) {
+    this(configuration, sql, null);
+  }
+
+  public StaticSqlSource(Configuration configuration, String sql, List<ParameterMapping> parameterMappings) {
+    this.sql = sql;
+    this.parameterMappings = parameterMappings;
+    this.configuration = configuration;
+  }
+
+  @Override
+  public BoundSql getBoundSql(Object parameterObject) {
+    return new BoundSql(configuration, sql, parameterMappings, parameterObject);
+  }
+
+}
+```
+
+
+
+###### 2.3.5.5 DynamicContext（mybaits上下文）
+
+```java
+public class DynamicContext {
+
+  public static final String PARAMETER_OBJECT_KEY = "_parameter";
+  public static final String DATABASE_ID_KEY = "_databaseId";
+
+  static {
+    OgnlRuntime.setPropertyAccessor(ContextMap.class, new ContextAccessor());
+  }
+
+  private final ContextMap bindings;
+  //通过sqlBuilder来拼接获取最终的sql
+  private final StringBuilder sqlBuilder = new StringBuilder();
+  private int uniqueNumber = 0;
+
+  //
+  public DynamicContext(Configuration configuration, Object parameterObject) {
+    if (parameterObject != null && !(parameterObject instanceof Map)) {
+      MetaObject metaObject = configuration.newMetaObject(parameterObject);
+      bindings = new ContextMap(metaObject);
+    } else {
+      //ContextMap，又是一个对弈hashmap的封装
+      bindings = new ContextMap(null);
+    }
+    //ContextMap bindings加入_parameter和_databaseId，后续参数设置要用到（静态sql这里设置的是空）
+    bindings.put(PARAMETER_OBJECT_KEY, parameterObject);
+    bindings.put(DATABASE_ID_KEY, configuration.getDatabaseId());
+  }
+
+  public Map<String, Object> getBindings() {
+    return bindings;
+  }
+
+  public void bind(String name, Object value) {
+    bindings.put(name, value);
+  }
+
+  //拼接sql
+  public void appendSql(String sql) {
+    sqlBuilder.append(sql);
+    sqlBuilder.append(" ");
+  }
+
+  public String getSql() {
+    return sqlBuilder.toString().trim();
+  }
+
+  public int getUniqueNumber() {
+    return uniqueNumber++;
+  }
+
+  static class ContextMap extends HashMap<String, Object> {
+    private static final long serialVersionUID = 2977601501966151582L;
+
+    private MetaObject parameterMetaObject;
+    public ContextMap(MetaObject parameterMetaObject) {
+      this.parameterMetaObject = parameterMetaObject;
+    }
+
+    @Override
+    public Object get(Object key) {
+      String strKey = (String) key;
+      if (super.containsKey(strKey)) {
+        return super.get(strKey);
+      }
+
+      if (parameterMetaObject != null) {
+        // issue #61 do not modify the context when reading
+        return parameterMetaObject.getValue(strKey);
+      }
+
+      return null;
+    }
+  }
+
+  static class ContextAccessor implements PropertyAccessor {
+
+    @Override
+    public Object getProperty(Map context, Object target, Object name)
+        throws OgnlException {
+      Map map = (Map) target;
+
+      Object result = map.get(name);
+      if (map.containsKey(name) || result != null) {
+        return result;
+      }
+
+      Object parameterObject = map.get(PARAMETER_OBJECT_KEY);
+      if (parameterObject instanceof Map) {
+        return ((Map)parameterObject).get(name);
+      }
+
+      return null;
+    }
+
+    @Override
+    public void setProperty(Map context, Object target, Object name, Object value)
+        throws OgnlException {
+      Map<Object, Object> map = (Map<Object, Object>) target;
+      map.put(name, value);
+    }
+
+    @Override
+    public String getSourceAccessor(OgnlContext arg0, Object arg1, Object arg2) {
+      return null;
+    }
+
+    @Override
+    public String getSourceSetter(OgnlContext arg0, Object arg1, Object arg2) {
+      return null;
+    }
+  }
+```
+
+###### 2.3.5.6  SqlSourceBuilder （生成最终的sql，并且生成一个StaticSqlSource）
+
+```java
+public class SqlSourceBuilder extends BaseBuilder {
+
+  private static final String parameterProperties = "javaType,jdbcType,mode,numericScale,resultMap,typeHandler,jdbcTypeName";
+
+  public SqlSourceBuilder(Configuration configuration) {
+    super(configuration);
+  }
+
+  public SqlSource parse(String originalSql, Class<?> parameterType, Map<String, Object> additionalParameters) {
+    //生成参数映射处理器
+    ParameterMappingTokenHandler handler = new ParameterMappingTokenHandler(configuration, parameterType, additionalParameters);
+    //看样子是要处理#{}
+    GenericTokenParser parser = new GenericTokenParser("#{", "}", handler);
+    //吃力完后，这边就返回一个select * from ct_user where id = ?
+    String sql = parser.parse(originalSql);
+    //然后生成一个静态sqlSource
+    return new StaticSqlSource(configuration, sql, handler.getParameterMappings());
+  }
+
+  private static class ParameterMappingTokenHandler extends BaseBuilder implements TokenHandler {
+
+    private List<ParameterMapping> parameterMappings = new ArrayList<ParameterMapping>();
+    private Class<?> parameterType;
+    private MetaObject metaParameters;
+
+    public ParameterMappingTokenHandler(Configuration configuration, Class<?> parameterType, Map<String, Object> additionalParameters) {
+      super(configuration);
+      this.parameterType = parameterType;
+      this.metaParameters = configuration.newMetaObject(additionalParameters);
+    }
+
+    public List<ParameterMapping> getParameterMappings() {
+      return parameterMappings;
+    }
+
+    @Override
+    public String handleToken(String content) {
+      //解析参数映射，将解析的参数放入到 List<ParameterMapping> parameterMappings中去，此处包括类型，字段名、jdbctype javatype等
+      parameterMappings.add(buildParameterMapping(content));
+      //并返回一个问号
+      return "?";
+    }
+
+    //处理参数映射
+    private ParameterMapping buildParameterMapping(String content) {
+      Map<String, String> propertiesMap = parseParameterMapping(content);
+      String property = propertiesMap.get("property");
+      Class<?> propertyType;
+      if (metaParameters.hasGetter(property)) { // issue #448 get type from additional params
+        propertyType = metaParameters.getGetterType(property);
+      } else if (typeHandlerRegistry.hasTypeHandler(parameterType)) {
+        propertyType = parameterType;
+      } else if (JdbcType.CURSOR.name().equals(propertiesMap.get("jdbcType"))) {
+        propertyType = java.sql.ResultSet.class;
+      } else if (property == null || Map.class.isAssignableFrom(parameterType)) {
+        propertyType = Object.class;
+      } else {
+        MetaClass metaClass = MetaClass.forClass(parameterType, configuration.getReflectorFactory());
+        if (metaClass.hasGetter(property)) {
+          propertyType = metaClass.getGetterType(property);
+        } else {
+          propertyType = Object.class;
+        }
+      }
+      ParameterMapping.Builder builder = new ParameterMapping.Builder(configuration, property, propertyType);
+      Class<?> javaType = propertyType;
+      String typeHandlerAlias = null;
+      for (Map.Entry<String, String> entry : propertiesMap.entrySet()) {
+        String name = entry.getKey();
+        String value = entry.getValue();
+        if ("javaType".equals(name)) {
+          javaType = resolveClass(value);
+          builder.javaType(javaType);
+        } else if ("jdbcType".equals(name)) {
+          builder.jdbcType(resolveJdbcType(value));
+        } else if ("mode".equals(name)) {
+          builder.mode(resolveParameterMode(value));
+        } else if ("numericScale".equals(name)) {
+          builder.numericScale(Integer.valueOf(value));
+        } else if ("resultMap".equals(name)) {
+          builder.resultMapId(value);
+        } else if ("typeHandler".equals(name)) {
+          typeHandlerAlias = value;
+        } else if ("jdbcTypeName".equals(name)) {
+          builder.jdbcTypeName(value);
+        } else if ("property".equals(name)) {
+          // Do Nothing
+        } else if ("expression".equals(name)) {
+          throw new BuilderException("Expression based parameters are not supported yet");
+        } else {
+          throw new BuilderException("An invalid property '" + name + "' was found in mapping #{" + content + "}.  Valid properties are " + parameterProperties);
+        }
+      }
+      if (typeHandlerAlias != null) {
+        builder.typeHandler(resolveTypeHandler(javaType, typeHandlerAlias));
+      }
+      return builder.build();
+    }
+
+    private Map<String, String> parseParameterMapping(String content) {
+      try {
+        return new ParameterExpression(content);
+      } catch (BuilderException ex) {
+        throw ex;
+      } catch (Exception ex) {
+        throw new BuilderException("Parsing error was found in mapping #{" + content + "}.  Check syntax #{property|(expression), var1=value1, var2=value2, ...} ", ex);
+      }
+    }
+  }
+
+}
+```
+
+从这里也可以清楚的看到，SqlSourceBuilder的作用就是将sql加工，分别生成最终的sql(带问号的)和参数映射的一个工具类
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2287,4 +3041,10 @@ public void parseStatementNode() {
 
 1. XMLIncludeTransformer：解析<include>节点的
 
-   
+
+
+
+
+```
+GenericTokenParser   ---  解析带${}和#{}的字符串的
+```

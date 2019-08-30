@@ -11,7 +11,7 @@
         <id property="id" column="id" javaType="long" jdbcType="NUMERIC"></id>
     </resultMap>
 
-    <select id="getById" resultType="book">
+    <select id="getById" resultType="book" parameterType="Long">
         select * from ct_book where id = #{id}
     </select>
 </mapper>
