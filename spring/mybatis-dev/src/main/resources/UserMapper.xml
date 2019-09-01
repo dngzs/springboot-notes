@@ -10,7 +10,8 @@
             <arg column="username" javaType="String" name="username"></arg>
         </constructor>
         <id property="id" column="id" javaType="long" jdbcType="NUMERIC"></id>
-        <result property="username" column="username" jdbcType="VARCHAR" typeHandler="org.apache.ibatis.type.StringTypeHandler"></result>
+        <result property="username" column="username" jdbcType="VARCHAR"
+                typeHandler="org.apache.ibatis.type.StringTypeHandler"></result>
         <association property="book" select="com.best.dao.BookMapper.getById" column="id"></association>
         <discriminator javaType="int" column="sex">
             <case value="1" resultType="female"></case>
@@ -20,7 +21,8 @@
 
     <resultMap id="user_map_id" type="CtUser">
         <id property="id" column="id" javaType="long" jdbcType="NUMERIC"></id>
-        <result property="username" column="username" jdbcType="VARCHAR" typeHandler="org.apache.ibatis.type.StringTypeHandler"></result>
+        <result property="username" column="username" jdbcType="VARCHAR"
+                typeHandler="org.apache.ibatis.type.StringTypeHandler"></result>
     </resultMap>
 
     <cache eviction="LRU"
@@ -31,6 +33,7 @@
            type="PERPETUAL">
         <property name="name" value="zhangsan"/>
     </cache>
+
     <!--
     1.eviction存在如下几种表现形式（默认引用LRU）
         typeAliasRegistry.registerAlias("PERPETUAL", PerpetualCache.class)  PERPETUAL 永久缓存
@@ -61,27 +64,48 @@
         from ct_user t1 where id = #{id}
     </select>
 
-    <select id="getWithPo" resultType="ctUser" >
+
+    <select id="getByIds" resultMap="user_map">
+        select
+        <include refid="${user_table}">
+            <property name="alias" value="t1"/>
+        </include>
+        from ct_user t1
+        where id in
+        <foreach collection="ids" item="id" close=")" open="(" separator=",">
+             #{id}
+        </foreach>
+    </select>
+
+    <select id="getWithPo" resultType="ctUser">
         select
         <include refid="${user_table}">
             <property name="alias" value="t"/>
         </include>
         where t.id = #{id}
         <if test="age != 0">
-            and  t.age = #{age}
+            and t.age = #{age}
         </if>
     </select>
-
-
 
 
     <sql id="user"> ${alias}.age,${alias}.username,${alias}.id,${alias}.sex</sql>
 
 
-
-
     <select id="getWithAgeAndId" resultType="ctUser">
-         select * from ct_user where id = #{id} and age = #{age}
+        select * from ct_user t
+        <trim prefix="where" prefixOverrides="and | or">
+            and t.id = #{id}
+            <choose>
+                <when test="age != 0">
+                    and age = #{age}
+                </when>
+                <otherwise>
+                    and age = 18
+                </otherwise>
+            </choose>
+
+        </trim>
     </select>
 
 </mapper>

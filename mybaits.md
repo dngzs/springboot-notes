@@ -2098,7 +2098,7 @@ public void addResultMap(ResultMap rm) {
 
 最后看下生成后的截图
 
-![](C:\Users\bg317957\Desktop\springboot-notes\mybatisimg\8.png)
+![](mybatisimg\8.png)
 
 ==可以看到，基本都是一个全类名，一个简单命名，这是因为mybatis复写了hashmap,在放入的同时，放入了一个简单的key==
 
@@ -2156,7 +2156,7 @@ private void sqlElement(List<XNode> list, String requiredDatabaseId) throws Exce
 
 XMLMapperBuilder#  Map<String, XNode> sqlFragments，这个sqlFragments其实在创建的时候就是拿的configuration的sqlFragments引用，于是这里存入就是存入了configuration的sqlFragments中去了
 
-##### 3.4.5  解析sql crud语句
+#### 3.5  解析sql crud语句
 
 mybatis作为一个orm框架，那么最重要的就是增删改查了，这也是mybaits最有价值的部分，mybatis前面这些组件铺垫了这么久，就是为了这一刻。为了研究清楚mybaits对于crud的实现，我决定深入crud的源码进行详细了解不理解这一块，那么真正的使用起来只能证明你不是一个老油条，更谈不上对mybatis有深刻的理解了。
 
@@ -2261,7 +2261,7 @@ public void parseStatementNode() {
         configuration.isUseGeneratedKeys() && SqlCommandType.INSERT.equals(sqlCommandType))
         ? Jdbc3KeyGenerator.INSTANCE : NoKeyGenerator.INSTANCE;
   }
-
+  //这里就将解析到的sql信息等等放入MappedStatement中
   builderAssistant.addMappedStatement(id, sqlSource, statementType, sqlCommandType,
       fetchSize, timeout, parameterMap, parameterTypeClass, resultMap, resultTypeClass,
       resultSetTypeEnum, flushCache, useCache, resultOrdered, 
@@ -2269,11 +2269,194 @@ public void parseStatementNode() {
 }
 ```
 
+MapperBuilderAssistant#addMappedStatement
+
+```java
+public MappedStatement addMappedStatement(
+    String id,
+    SqlSource sqlSource,
+    StatementType statementType,
+    SqlCommandType sqlCommandType,
+    Integer fetchSize,
+    Integer timeout,
+    String parameterMap,
+    Class<?> parameterType,
+    String resultMap,
+    Class<?> resultType,
+    ResultSetType resultSetType,
+    boolean flushCache,
+    boolean useCache,
+    boolean resultOrdered,
+    KeyGenerator keyGenerator,
+    String keyProperty,
+    String keyColumn,
+    String databaseId,
+    LanguageDriver lang,
+    String resultSets) {
+
+  //这里先判断cache-ref有没有已经设置好了，如果没有，那就直接异常，等后续再处理
+  if (unresolvedCacheRef) {
+    throw new IncompleteElementException("Cache-ref not yet resolved");
+  }
+  //获取sql的id
+  id = applyCurrentNamespace(id, false);
+  //是不是select
+  boolean isSelect = sqlCommandType == SqlCommandType.SELECT;
+
+  MappedStatement.Builder statementBuilder = new MappedStatement.Builder(configuration, id, sqlSource, sqlCommandType)
+      .resource(resource)
+      .fetchSize(fetchSize)
+      .timeout(timeout)
+      .statementType(statementType)
+      .keyGenerator(keyGenerator)
+      .keyProperty(keyProperty)
+      .keyColumn(keyColumn)
+      .databaseId(databaseId)
+      .lang(lang)
+      .resultOrdered(resultOrdered)
+      .resultSets(resultSets)
+      //这里去configuration去拿resultMap，也可能拿不到，因为resultMap还没初始化，IncompleteElementException
+      .resultMaps(getStatementResultMaps(resultMap, resultType, id))
+      .resultSetType(resultSetType)
+      .flushCacheRequired(valueOrDefault(flushCache, !isSelect))
+      .useCache(valueOrDefault(useCache, isSelect))
+      .cache(currentCache);
+
+  ParameterMap statementParameterMap = getStatementParameterMap(parameterMap, parameterType, id);
+  if (statementParameterMap != null) {
+    statementBuilder.parameterMap(statementParameterMap);
+  }
+
+  MappedStatement statement = statementBuilder.build();
+  configuration.addMappedStatement(statement);
+  return statement;
+}
+```
+
+这里处理思路很正常，如果发现报错，就加入到==configuration的==
+
+==Collection<XMLStatementBuilder> incompleteStatements==中去，等后续再去处理，处理时机就和cache-ref，resultMap一样
+
+```java
+parsePendingResultMaps();
+parsePendingCacheRefs();
+//因为MapperStatement要用到ResultMap和CacheRef来创建，所以后续处理
+parsePendingStatements();
+```
+
+解析到MappedStatement，加入到configuration中去
+
+```java
+configuration.addMappedStatement(statement);
+
+Map<String, MappedStatement> mappedStatements
+```
+
+最终configurationElement(parser.evalNode("/mapper"));分析就差不多了，这里还有两个步骤需要分析
+
+```java
+public void parse() {
+  if (!configuration.isResourceLoaded(resource)) {
+    configurationElement(parser.evalNode("/mapper"));
+    configuration.addLoadedResource(resource);
+    bindMapperForNamespace();
+  }
+
+  parsePendingResultMaps();
+  parsePendingCacheRefs();
+  parsePendingStatements();
+}
+```
+
+```java
+//加入到configuration，防止重复添加
+configuration.addLoadedResource(resource);
+```
+
+ 
+
+```java
+bindMapperForNamespace();
+
+private void bindMapperForNamespace() {
+    //获取namespace
+    String namespace = builderAssistant.getCurrentNamespace();
+    if (namespace != null) {
+      Class<?> boundType = null;
+      try {
+        //拿到binding的type，也就是接口
+        boundType = Resources.classForName(namespace);
+      } catch (ClassNotFoundException e) {
+        //ignore, bound type is not required
+      }
+      if (boundType != null) {
+        //如果从来都没加入过
+        if (!configuration.hasMapper(boundType)) {
+          //Spring可能不知道真正的资源名称，因此我们设置了一个标志
+          configuration.addLoadedResource("namespace:" + namespace);
+          //这一步就比较关键了
+          configuration.addMapper(boundType);
+        }
+      }
+    }
+  }
+```
+
+```java
+public <T> void addMapper(Class<T> type) {
+  mapperRegistry.addMapper(type);
+}
+```
+
+mapperRegistry#addMapper
+
+```java
+public <T> void addMapper(Class<T> type) {
+  //是不是一个接口
+  if (type.isInterface()) {
+     //以前绑定过吗？如果绑定过，报错重复绑定
+    if (hasMapper(type)) {
+      throw new BindingException("Type " + type + " is already known to the MapperRegistry.");
+    }
+    boolean loadCompleted = false;
+    try {
+      //生成MapperProxyFactory，并且绑定到knownMappers中去
+      knownMappers.put(type, new MapperProxyFactory<T>(type));
+      //这里尝试使用注解的方式来处理，先这样，我们后续专门找一个时间来分析基于注解的mybaits
+      MapperAnnotationBuilder parser = new MapperAnnotationBuilder(config, type);
+      parser.parse();
+      loadCompleted = true;
+    } finally {
+      if (!loadCompleted) {
+        knownMappers.remove(type);
+      }
+    }
+  }
+}
+```
+
+至此，mybaits的configuration的创建就完成了，下拉，我们就总结下，顺便话一个时序图来解析下我们对于sql部分的分析代码
+
+------
+
+这里我们知道下面这几个对象需要注意下，我们一一来看**
+
+##### 3.5.1 LanguageDriver
+
+虽然官方名称叫做LanguageDriver，其实叫做解析器可能更加合理。MyBatis 从 3.2 开始支持可插拔的脚本语言，因此你可以在插入一种语言的驱动（language driver）之后来写基于这种语言的动态 SQL 查询比如mybatis除了XML格式外，还提供了mybatis-velocity，允许使用velocity表达式编写SQL语句。可以通过实现LanguageDriver接口的方式来插入一种语言：
+
+```java
+public interface LanguageDriver {
+  ParameterHandler createParameterHandler(MappedStatement mappedStatement, Object parameterObject, BoundSql boundSql);
+
+  SqlSource createSqlSource(Configuration configuration, XNode script, Class<?> parameterType);
+
+  SqlSource createSqlSource(Configuration configuration, String script, Class<?> parameterType);
+
+}
+```
 
 
-这里我们知道下面这几个对象需要注意下，我们一一来看
-
-###### 3.4.5.1 LanguageDriver
 
 1. LanguageDriver：处理sql的语言驱动器
 
@@ -2323,6 +2506,7 @@ public class XMLScriptBuilder extends BaseBuilder {
     nodeHandlerMap.put("foreach", new ForEachHandler());
     nodeHandlerMap.put("if", new IfHandler());
     nodeHandlerMap.put("choose", new ChooseHandler());
+    //when就是if闪现的
     nodeHandlerMap.put("when", new IfHandler());
     nodeHandlerMap.put("otherwise", new OtherwiseHandler());
     nodeHandlerMap.put("bind", new BindHandler());
@@ -2348,7 +2532,9 @@ public class XMLScriptBuilder extends BaseBuilder {
 }
 ```
 
-准备工作做好了，开始解析XMLScriptBuilder#parseScriptNode()
+准备工作做好了，开始解析XMLScriptBuilder#parseScriptNode()；
+
+注意：mybatis在解析sql的时候，分为动态sql和静态sql，动态指的是SQL文本里面包含了${}动态变量或者包含等元素的sql节点,它将合成为SQL语句的一部分发送给数据库，然后根据是否动态sql决定实例化的SqlSource为DynamicSqlSource或RawSqlSource。下面来看解析的步骤
 
 ```java
 public SqlSource parseScriptNode() {
@@ -2364,7 +2550,7 @@ public SqlSource parseScriptNode() {
 }
 ```
 
-来看下mixedSqlNode怎么解析出来的
+来看下mixedSqlNode怎么解析出来的 
 
 XMLScriptBuilder#parseDynamicTags()
 
@@ -2384,7 +2570,7 @@ protected MixedSqlNode parseDynamicTags(XNode node) {
       TextSqlNode textSqlNode = new TextSqlNode(data);
       //解析是不是动态sql（判断是不是动态sql的标准是sql中存在${}否）
       if (textSqlNode.isDynamic()) {
-        //如果是动态的，就将isDynamic标识，一条是动态sql，那么这个select下的sql就是动态的了
+        //如果是动态的，就将isDynamic标识设为true
         contents.add(textSqlNode);
         isDynamic = true;
       } else {
@@ -2438,9 +2624,7 @@ public SqlSource parseScriptNode() {
 }
 ```
 
-
-
-###### 3.4.5.2  sqlNode（sql节点的接口）
+##### 3.5.2  sqlNode（sql节点的接口）
 
 这里又一个很重要的接口sqlNode,下面这是sqlNode的实现
 
@@ -2457,7 +2641,7 @@ public SqlSource parseScriptNode() {
 
 
 
-**MixedSqlNode**
+###### 3.5.2.1 MixedSqlNode
 
 ```java
 public class MixedSqlNode implements SqlNode {
@@ -2478,7 +2662,7 @@ public class MixedSqlNode implements SqlNode {
 }
 ```
 
-**TextSqlNode**
+###### 3.5.2.2  TextSqlNode
 
 ```java
 public class TextSqlNode implements SqlNode {
@@ -2544,7 +2728,7 @@ public class TextSqlNode implements SqlNode {
 }
 ```
 
-**StaticTextSqlNode**
+###### 3.5.2.3 StaticTextSqlNode
 
 ```java
 public class StaticTextSqlNode implements SqlNode {
@@ -2565,7 +2749,7 @@ public class StaticTextSqlNode implements SqlNode {
 }
 ```
 
-**IfSqlNode**
+###### 3.5.2.4 IfSqlNode
 
 ```java
 public class IfSqlNode implements SqlNode {
@@ -2594,13 +2778,445 @@ public class IfSqlNode implements SqlNode {
 }
 ```
 
+###### 3.5.2.5 ChooseSqlNode
+
+```java
+public class ChooseSqlNode implements SqlNode {
+  private final SqlNode defaultSqlNode;
+  private final List<SqlNode> ifSqlNodes;
+
+  public ChooseSqlNode(List<SqlNode> ifSqlNodes, SqlNode defaultSqlNode) {
+    this.ifSqlNodes = ifSqlNodes;
+    this.defaultSqlNode = defaultSqlNode;
+  }
+
+  @Override
+  public boolean apply(DynamicContext context) {
+    //遍历when
+    for (SqlNode sqlNode : ifSqlNodes) {
+      if (sqlNode.apply(context)) {
+        return true;
+      }
+    }
+    //遍历otherWise
+    if (defaultSqlNode != null) {
+      defaultSqlNode.apply(context);
+      return true;
+    }
+    return false;
+  }
+}
+```
+
+###### 2.5.2.6 WhereSqlNode 
+
+WhereSqlNode继承了TrimSqlNode，实现委托给了TrimSqlNode
+
+```java
+public class WhereSqlNode extends TrimSqlNode {
+
+  private static List<String> prefixList = Arrays.asList("AND ","OR ","AND\n", "OR\n", "AND\r", "OR\r", "AND\t", "OR\t");
+
+  public WhereSqlNode(Configuration configuration, SqlNode contents) {
+    super(configuration, contents, "WHERE", prefixList, null, null);
+  }
+
+}
+```
+
+###### 2.5.2.7  TrimSqlNode
+
+```java
+public class TrimSqlNode implements SqlNode {
+
+  private final SqlNode contents;
+  private final String prefix;
+  private final String suffix;
+  private final List<String> prefixesToOverride;
+  private final List<String> suffixesToOverride;
+  private final Configuration configuration;
+
+  public TrimSqlNode(Configuration configuration, SqlNode contents, String prefix, String prefixesToOverride, String suffix, String suffixesToOverride) {
+    this(configuration, contents, prefix, parseOverrides(prefixesToOverride), suffix, parseOverrides(suffixesToOverride));
+  }
+
+  protected TrimSqlNode(Configuration configuration, SqlNode contents, String prefix, List<String> prefixesToOverride, String suffix, List<String> suffixesToOverride) {
+    this.contents = contents;
+    this.prefix = prefix;
+    this.prefixesToOverride = prefixesToOverride;
+    this.suffix = suffix;
+    this.suffixesToOverride = suffixesToOverride;
+    this.configuration = configuration;
+  }
+
+  @Override
+  public boolean apply(DynamicContext context) {
+    FilteredDynamicContext filteredDynamicContext = new FilteredDynamicContext(context);
+    //先处理掉sql,拿到解析后的sql
+    boolean result = contents.apply(filteredDynamicContext);
+    //再统一处理前缀后缀
+    filteredDynamicContext.applyAll();
+    return result;
+  }
+
+  private static List<String> parseOverrides(String overrides) {
+    if (overrides != null) {
+      final StringTokenizer parser = new StringTokenizer(overrides, "|", false);
+      final List<String> list = new ArrayList<String>(parser.countTokens());
+      while (parser.hasMoreTokens()) {
+        list.add(parser.nextToken().toUpperCase(Locale.ENGLISH));
+      }
+      return list;
+    }
+    return Collections.emptyList();
+  }
+
+  private class FilteredDynamicContext extends DynamicContext {
+    private DynamicContext delegate;
+    private boolean prefixApplied;
+    private boolean suffixApplied;
+    private StringBuilder sqlBuffer;
+
+    public FilteredDynamicContext(DynamicContext delegate) {
+      super(configuration, null);
+      this.delegate = delegate;
+      this.prefixApplied = false;
+      this.suffixApplied = false;
+      this.sqlBuffer = new StringBuilder();
+    }
+
+    public void applyAll() {
+      //拿到sql
+      sqlBuffer = new StringBuilder(sqlBuffer.toString().trim());
+      //拿到大写
+      String trimmedUppercaseSql = sqlBuffer.toString().toUpperCase(Locale.ENGLISH);
+      //如果大写的长度不是0
+      if (trimmedUppercaseSql.length() > 0) {
+        //处理前缀
+        //对于where的前缀（"AND ","OR ","AND\n", "OR\n", "AND\r", "OR\r", "AND\t", "OR\t）
+        applyPrefix(sqlBuffer, trimmedUppercaseSql);
+        //处理后缀
+        applySuffix(sqlBuffer, trimmedUppercaseSql);
+      }
+      delegate.appendSql(sqlBuffer.toString());
+    }
+
+    @Override
+    public Map<String, Object> getBindings() {
+      return delegate.getBindings();
+    }
+
+    @Override
+    public void bind(String name, Object value) {
+      delegate.bind(name, value);
+    }
+
+    @Override
+    public int getUniqueNumber() {
+      return delegate.getUniqueNumber();
+    }
+
+    @Override
+    public void appendSql(String sql) {
+      sqlBuffer.append(sql);
+    }
+
+    @Override
+    public String getSql() {
+      return delegate.getSql();
+    }
+
+    private void applyPrefix(StringBuilder sql, String trimmedUppercaseSql) {
+      if (!prefixApplied) {
+        prefixApplied = true;
+        if (prefixesToOverride != null) {
+          for (String toRemove : prefixesToOverride) {
+            if (trimmedUppercaseSql.startsWith(toRemove)) {
+              sql.delete(0, toRemove.trim().length());
+              break;
+            }
+          }
+        }
+        if (prefix != null) {
+          sql.insert(0, " ");
+          sql.insert(0, prefix);
+        }
+      }
+    }
+
+    private void applySuffix(StringBuilder sql, String trimmedUppercaseSql) {
+      if (!suffixApplied) {
+        suffixApplied = true;
+        if (suffixesToOverride != null) {
+          for (String toRemove : suffixesToOverride) {
+            if (trimmedUppercaseSql.endsWith(toRemove) || trimmedUppercaseSql.endsWith(toRemove.trim())) {
+              int start = sql.length() - toRemove.trim().length();
+              int end = sql.length();
+              sql.delete(start, end);
+              break;
+            }
+          }
+        }
+        if (suffix != null) {
+          sql.append(" ");
+          sql.append(suffix);
+        }
+      }
+    }
+
+  }
+
+}
+```
+
+###### 2.5.2.8 SetSqlNode
+
+```xml
+<update id="updateAuthorIfNecessary">
+  update Author
+    <set>
+      <if test="username != null">username=#{username},</if>
+      <if test="password != null">password=#{password},</if>
+      <if test="email != null">email=#{email},</if>
+      <if test="bio != null">bio=#{bio}</if>
+    </set>
+  where id=#{id}
+</update>
+```
+
+Set也是trim的一种特定实现，后缀略去；SetSqlNode继承了TrimSqlNode，实现委托给了TrimSqlNode。
+
+所以上面的xml也可以这样写
+
+```xml
+<trim prefix="SET" suffixOverrides=",">
+  ...
+</trim>
+```
+
+```java
+public class SetSqlNode extends TrimSqlNode {
+
+  private static List<String> suffixList = Arrays.asList(",");
+
+  public SetSqlNode(Configuration configuration,SqlNode contents) {
+    super(configuration, contents, "SET", null, null, suffixList);
+  }
+
+}
+```
+
+###### 2.5.2.9  ForEachSqlNode
+
+```java
+public class ForEachSqlNode implements SqlNode {
+  public static final String ITEM_PREFIX = "__frch_";
+
+  private final ExpressionEvaluator evaluator;
+  private final String collectionExpression;
+  private final SqlNode contents;
+  private final String open;
+  private final String close;
+  private final String separator;
+  private final String item;
+  private final String index;
+  private final Configuration configuration;
+
+  public ForEachSqlNode(Configuration configuration, SqlNode contents, String collectionExpression, String index, String item, String open, String close, String separator) {
+    this.evaluator = new ExpressionEvaluator();
+    this.collectionExpression = collectionExpression;
+    this.contents = contents;
+    this.open = open;
+    this.close = close;
+    this.separator = separator;
+    this.index = index;
+    this.item = item;
+    this.configuration = configuration;
+  }
+
+  @Override
+  public boolean apply(DynamicContext context) {
+    Map<String, Object> bindings = context.getBindings();
+    // 将Map/Array/List统一包装为迭代器接口
+    final Iterable<?> iterable = evaluator.evaluateIterable(collectionExpression, bindings);
+    //判断迭代器有没有元素
+    if (!iterable.iterator().hasNext()) {
+      return true;
+    }
+    boolean first = true;
+    //添加open值
+    applyOpen(context);
+    int i = 0;
+    for (Object o : iterable) {
+      DynamicContext oldContext = context;
+      if (first || separator == null) {
+        context = new PrefixedContext(context, "");
+      } else {
+        context = new PrefixedContext(context, separator);
+      }
+      int uniqueNumber = context.getUniqueNumber();
+      // Issue #709 
+      if (o instanceof Map.Entry) {
+        @SuppressWarnings("unchecked") 
+        Map.Entry<Object, Object> mapEntry = (Map.Entry<Object, Object>) o;
+        applyIndex(context, mapEntry.getKey(), uniqueNumber);
+        applyItem(context, mapEntry.getValue(), uniqueNumber);
+      } else {
+        applyIndex(context, i, uniqueNumber);
+        applyItem(context, o, uniqueNumber);
+      }
+      contents.apply(new FilteredDynamicContext(configuration, context, index, item, uniqueNumber));
+      if (first) {
+        first = !((PrefixedContext) context).isPrefixApplied();
+      }
+      context = oldContext;
+      i++;
+    }
+    applyClose(context);
+    context.getBindings().remove(item);
+    context.getBindings().remove(index);
+    return true;
+  }
+
+  private void applyIndex(DynamicContext context, Object o, int i) {
+    if (index != null) {
+      context.bind(index, o);
+      context.bind(itemizeItem(index, i), o);
+    }
+  }
+
+  private void applyItem(DynamicContext context, Object o, int i) {
+    if (item != null) {
+      context.bind(item, o);
+      context.bind(itemizeItem(item, i), o);
+    }
+  }
+
+  private void applyOpen(DynamicContext context) {
+    if (open != null) {
+      context.appendSql(open);
+    }
+  }
+
+  private void applyClose(DynamicContext context) {
+    if (close != null) {
+      context.appendSql(close);
+    }
+  }
+
+  private static String itemizeItem(String item, int i) {
+    return new StringBuilder(ITEM_PREFIX).append(item).append("_").append(i).toString();
+  }
+
+  private static class FilteredDynamicContext extends DynamicContext {
+    private final DynamicContext delegate;
+    private final int index;
+    private final String itemIndex;
+    private final String item;
+
+    public FilteredDynamicContext(Configuration configuration,DynamicContext delegate, String itemIndex, String item, int i) {
+      super(configuration, null);
+      this.delegate = delegate;
+      this.index = i;
+      this.itemIndex = itemIndex;
+      this.item = item;
+    }
+
+    @Override
+    public Map<String, Object> getBindings() {
+      return delegate.getBindings();
+    }
+
+    @Override
+    public void bind(String name, Object value) {
+      delegate.bind(name, value);
+    }
+
+    @Override
+    public String getSql() {
+      return delegate.getSql();
+    }
+
+    @Override
+    public void appendSql(String sql) {
+      GenericTokenParser parser = new GenericTokenParser("#{", "}", new TokenHandler() {
+        @Override
+        public String handleToken(String content) {
+          String newContent = content.replaceFirst("^\\s*" + item + "(?![^.,:\\s])", itemizeItem(item, index));
+          if (itemIndex != null && newContent.equals(content)) {
+            newContent = content.replaceFirst("^\\s*" + itemIndex + "(?![^.,:\\s])", itemizeItem(itemIndex, index));
+          }
+          return new StringBuilder("#{").append(newContent).append("}").toString();
+        }
+      });
+
+      delegate.appendSql(parser.parse(sql));
+    }
+
+    @Override
+    public int getUniqueNumber() {
+      return delegate.getUniqueNumber();
+    }
+
+  }
 
 
-###### 2.3.5.3 NodeHandler（生成sql节点的接口）
+  private class PrefixedContext extends DynamicContext {
+    private final DynamicContext delegate;
+    private final String prefix;
+    private boolean prefixApplied;
+
+    public PrefixedContext(DynamicContext delegate, String prefix) {
+      super(configuration, null);
+      this.delegate = delegate;
+      this.prefix = prefix;
+      this.prefixApplied = false;
+    }
+
+    public boolean isPrefixApplied() {
+      return prefixApplied;
+    }
+
+    @Override
+    public Map<String, Object> getBindings() {
+      return delegate.getBindings();
+    }
+
+    @Override
+    public void bind(String name, Object value) {
+      delegate.bind(name, value);
+    }
+
+    @Override
+    public void appendSql(String sql) {
+      if (!prefixApplied && sql != null && sql.trim().length() > 0) {
+        delegate.appendSql(prefix);
+        prefixApplied = true;
+      }
+      delegate.appendSql(sql);
+    }
+
+    @Override
+    public String getSql() {
+      return delegate.getSql();
+    }
+
+    @Override
+    public int getUniqueNumber() {
+      return delegate.getUniqueNumber();
+    }
+  }
+
+}
+```
+
+##### 2.5.3 NodeHandler（生成sql节点的接口）
+
+
 
 ![](mybatisimg\12.png)
 
-**IfHandler**
+###### 2.5.3.1 IfHandler
 
 ```java
 private class IfHandler implements NodeHandler {
@@ -2610,7 +3226,7 @@ private class IfHandler implements NodeHandler {
 
   @Override
   public void handleNode(XNode nodeToHandle, List<SqlNode> targetContents) {
-    //又去XMLScriptBuilder#parseDynamicTags递归解析一次，直到解析<if>标签解析到干净的sql
+    //又去XMLScriptBuilder#parseDynamicTags递归解析一次，直到<if>标签解析到干净的sql
     MixedSqlNode mixedSqlNode = parseDynamicTags(nodeToHandle);
     //获取test属性值
     String test = nodeToHandle.getStringAttribute("test");
@@ -2622,7 +3238,141 @@ private class IfHandler implements NodeHandler {
 }
 ```
 
-###### 2.3.5.4 SqlSource接口（sql的表述）
+###### 2.5.3.2  ChooseHandler
+
+```xml
+<choose>
+    <when test="age != 0">
+        and age = #{age}
+    </when>
+    <otherwise>
+        and age = 18
+    </otherwise>
+</choose>
+```
+
+choose节点就相当于java里的swich,when就相当于其中的参数表达式
+
+```java
+private class ChooseHandler implements NodeHandler {
+    public ChooseHandler() {
+      // Prevent Synthetic Access
+    }
+
+    @Override
+    public void handleNode(XNode nodeToHandle, List<SqlNode> targetContents) {
+      //when（用ifHandler实现的）
+      List<SqlNode> whenSqlNodes = new ArrayList<SqlNode>();
+      //otherwise
+      List<SqlNode> otherwiseSqlNodes = new ArrayList<SqlNode>();
+      //将when和otherwise区分开
+      handleWhenOtherwiseNodes(nodeToHandle, whenSqlNodes, otherwiseSqlNodes);
+      //这里校验下otherwiseSqlNodes是不是只有一个
+      SqlNode defaultSqlNode = getDefaultSqlNode(otherwiseSqlNodes);
+      //随后生成ChooseSqlNode
+      ChooseSqlNode chooseSqlNode = new ChooseSqlNode(whenSqlNodes, defaultSqlNode);
+      //将ChooseSqlNode加入到chooseSqlNode中去
+      targetContents.add(chooseSqlNode);
+    }
+
+    private void handleWhenOtherwiseNodes(XNode chooseSqlNode, List<SqlNode> ifSqlNodes, List<SqlNode> defaultSqlNodes) {
+      List<XNode> children = chooseSqlNode.getChildren();
+      for (XNode child : children) {
+        String nodeName = child.getNode().getNodeName();
+        NodeHandler handler = nodeHandlerMap.get(nodeName);
+        if (handler instanceof IfHandler) {
+          handler.handleNode(child, ifSqlNodes);
+        } else if (handler instanceof OtherwiseHandler) {
+          handler.handleNode(child, defaultSqlNodes);
+        }
+      }
+    }
+
+    private SqlNode getDefaultSqlNode(List<SqlNode> defaultSqlNodes) {
+      SqlNode defaultSqlNode = null;
+      if (defaultSqlNodes.size() == 1) {
+        defaultSqlNode = defaultSqlNodes.get(0);
+      } else if (defaultSqlNodes.size() > 1) {
+        throw new BuilderException("Too many default (otherwise) elements in choose statement.");
+      }
+      return defaultSqlNode;
+    }
+  }
+
+}
+```
+
+###### 2.5.3.3 OtherwiseHandler
+
+otherwiseHandler其实也没做什么事情，就是解析到真实的sql node，然后再加入到targetContents中去
+
+```java
+private class OtherwiseHandler implements NodeHandler {
+  public OtherwiseHandler() {
+    // Prevent Synthetic Access
+  }
+
+  @Override
+  public void handleNode(XNode nodeToHandle, List<SqlNode> targetContents) {
+    MixedSqlNode mixedSqlNode = parseDynamicTags(nodeToHandle);
+    targetContents.add(mixedSqlNode);
+  }
+}
+```
+
+###### 2.5.3.4   TrimHandler
+
+
+
+```java
+private class TrimHandler implements NodeHandler {
+  public TrimHandler() {
+    // Prevent Synthetic Access
+  }
+
+  @Override
+  public void handleNode(XNode nodeToHandle, List<SqlNode> targetContents) {
+    MixedSqlNode mixedSqlNode = parseDynamicTags(nodeToHandle);
+    //sql节点不为空是，需要加的前缀
+    String prefix = nodeToHandle.getStringAttribute("prefix");
+    //要覆盖的前缀
+    String prefixOverrides = nodeToHandle.getStringAttribute("prefixOverrides");
+    //sql节点不为空是，需要加的后缀
+    String suffix = nodeToHandle.getStringAttribute("suffix");
+    //要覆盖的后缀
+    String suffixOverrides = nodeToHandle.getStringAttribute("suffixOverrides");
+    TrimSqlNode trim = new TrimSqlNode(configuration, mixedSqlNode, prefix, prefixOverrides, suffix, suffixOverrides);
+    targetContents.add(trim);
+  }
+}
+```
+
+###### 2.5.3.5  ForEachHandler
+
+你可以将任何可迭代对象（如 List、Set 等）、Map 对象或者数组对象传递给 *foreach* 作为集合参数。当使用可迭代对象或者数组时，index 是当前迭代的次数，item 的值是本次迭代获取的元素。当使用 Map 对象（或者 Map.Entry 对象的集合）时，index 是键，item 是值。
+
+```java
+private class ForEachHandler implements NodeHandler {
+  public ForEachHandler() {
+    // Prevent Synthetic Access
+  }
+
+  @Override
+  public void handleNode(XNode nodeToHandle, List<SqlNode> targetContents) {
+    MixedSqlNode mixedSqlNode = parseDynamicTags(nodeToHandle);
+    String collection = nodeToHandle.getStringAttribute("collection");
+    String item = nodeToHandle.getStringAttribute("item");
+    String index = nodeToHandle.getStringAttribute("index");
+    String open = nodeToHandle.getStringAttribute("open");
+    String close = nodeToHandle.getStringAttribute("close");
+    String separator = nodeToHandle.getStringAttribute("separator");
+    ForEachSqlNode forEachSqlNode = new ForEachSqlNode(configuration, mixedSqlNode, collection, index, item, open, close, separator);
+    targetContents.add(forEachSqlNode);
+  }
+}
+```
+
+##### 2.5.4 SqlSource接口（sql的表述）
 
 > ProviderSqlSource (org.apache.ibatis.builder.annotation)
 > StaticSqlSource (org.apache.ibatis.builder)
@@ -2630,7 +3380,7 @@ private class IfHandler implements NodeHandler {
 > BoundSqlSqlSource in PaginationInterceptor (com.oasis.captain.dao.core.plugin.pagination)
 > RawSqlSource (org.apache.ibatis.scripting.defaults)
 
-**DynamicSqlSource**
+###### 2.5.4.1 DynamicSqlSource
 
 ```java
 public class DynamicSqlSource implements SqlSource {
@@ -2663,7 +3413,7 @@ public class DynamicSqlSource implements SqlSource {
 }
 ```
 
-**RawSqlSource**
+###### 2.5.4.2 RawSqlSource
 
 ```java
 /**
@@ -2710,7 +3460,7 @@ public class RawSqlSource implements SqlSource {
 
 
 
-**StaticSqlSource**
+###### 2.5.4.3 StaticSqlSource
 
 处理完的sql都会生成StaticSqlSource，不管静态的sql还是动态的sql
 
@@ -2741,9 +3491,7 @@ public class StaticSqlSource implements SqlSource {
 }
 ```
 
-
-
-###### 2.3.5.5 DynamicContext（mybaits上下文）
+##### 2.5.5 DynamicContext（mybaits上下文）
 
 ```java
 public class DynamicContext {
@@ -2859,7 +3607,7 @@ public class DynamicContext {
   }
 ```
 
-###### 2.3.5.6  SqlSourceBuilder （生成最终的sql，并且生成一个StaticSqlSource）
+##### 2.5.6  SqlSourceBuilder （生成最终的sql，并且生成一个StaticSqlSource）
 
 ```java
 public class SqlSourceBuilder extends BaseBuilder {
@@ -2871,11 +3619,11 @@ public class SqlSourceBuilder extends BaseBuilder {
   }
 
   public SqlSource parse(String originalSql, Class<?> parameterType, Map<String, Object> additionalParameters) {
-    //生成参数映射处理器
+    //生成参数映射处理器，并且处理sql
     ParameterMappingTokenHandler handler = new ParameterMappingTokenHandler(configuration, parameterType, additionalParameters);
     //看样子是要处理#{}
     GenericTokenParser parser = new GenericTokenParser("#{", "}", handler);
-    //吃力完后，这边就返回一个select * from ct_user where id = ?
+    //处理完后，这边就返回一个select * from ct_user where id = ?
     String sql = parser.parse(originalSql);
     //然后生成一个静态sqlSource
     return new StaticSqlSource(configuration, sql, handler.getParameterMappings());
@@ -2976,6 +3724,8 @@ public class SqlSourceBuilder extends BaseBuilder {
 ```
 
 从这里也可以清楚的看到，SqlSourceBuilder的作用就是将sql加工，分别生成最终的sql(带问号的)和参数映射的一个工具类
+
+
 
 
 
