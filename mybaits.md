@@ -1,6 +1,6 @@
 # mybaits源码分析系列
 
-### 一、Configuration的创建
+### 一、容器的加载与初始化以及Configuration
 
 ###  1.SqlSessionFactory
 
@@ -299,7 +299,11 @@ public SqlSession openSession() {
 
 ### 2. Configuration是怎么创建的
 
-在上面的例子中我们知道，生成一个SqlSessionFactory是通过下面的这一行代码
+在上面的例子中，我们知道生成一个SqlSessionFactory是通过SqlSessionFactoryBuilder工厂来创建的，而在创建的过程中我们的Configuration诞生了，同时根据Configuration传入DefaultSqlSessionFactory构造方法中，SqlSessionFactory也诞生了。
+
+
+
+通过上面的简单分析，我们来看下生成一个SqlSessionFactory是通过下面的这一行代码
 
 ```java
 public static SqlSessionManager newInstance(Reader reader) {
@@ -3724,6 +3728,32 @@ public class SqlSourceBuilder extends BaseBuilder {
 ```
 
 从这里也可以清楚的看到，SqlSourceBuilder的作用就是将sql加工，分别生成最终的sql(带问号的)和参数映射的一个工具类
+
+#### 4. 总结
+
+在上面我们通过分析代码，可以看到，通过`SqlSessionFactoryBuilder().build(reader, null, null)`我们构造出了一个完成的mybaits容器，容器在初始化阶段也是比较复杂的了，大体上做了如下的工作
+
+- mybaits主配置文件的加载和解析
+
+​      主要解析了mybatis所需要运行的一些mybatis主的配置
+
+- mybaits mapper文件的加载和解析
+
+  通过mapper.xml文件解析了sql语句，resultMap , cache以及cache-ref，其中最重要的那就是解析sql文件了，对于sql文件的解析，我们归纳为这么几点
+
+  1. 解析mapper文件的crud标签
+  2. 判断是不是动态的sql，动态和静态sql的区别是不是存在${}或者sql节点存在<if><choose> <foreach> <where> <set> <trim>等的标签
+  3. 如果是动态sql，则解析为DynamicSqlSource（以MixedSqlNode的形式（List<sqlNode>））的形式保存在MappedStatement中，如果是静态sql，则解析为RawSqlSource（以StaticSqlSource<存放了解析好的sql语句以及参数名称类型等列表>的形式）的形式保存在MappedStatement中
+
+- 解析完主配置，cache-ref 、cache、resultMap、sql片段等，通过这些配置解析到sql语句，然后以MappedStatement将sql信息保存在MappedStatement中，方便后续应用
+
+大体上，简单就概括为上述内容了，那么下面我们就上面的最重要的两个阶段来画几个时序图来加上理解下
+
+1. SqlSessionFactory的创建
+
+![](mybatisimg\mybaits-sqlSessionFactory-create.png)
+
+
 
 
 
