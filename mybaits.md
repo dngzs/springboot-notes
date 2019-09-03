@@ -3758,7 +3758,9 @@ public class SqlSourceBuilder extends BaseBuilder {
 
 ![](mybatisimg\mybatis resultMap.png)
 
-3. sqlsource
+3. MappedStatement解析与注册
+
+
 
 
 
