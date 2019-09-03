@@ -1914,10 +1914,10 @@ public ResultMap addResultMap(
     }
     //获取到继承的ResultMap
     ResultMap resultMap = configuration.getResultMap(extend);
-    //这里会做一个去重，将子类的resultMap和父类的resultMap的子节点相同的元素一出掉
+    //这里会做一个去重，将父类的ResultMapping与子类的元素相同的过滤掉
     List<ResultMapping> extendedResultMappings = new ArrayList<ResultMapping>(resultMap.getResultMappings());
     extendedResultMappings.removeAll(resultMappings);
-    //这里会去除掉父类的CONSTRUCTOR节点
+    //如果子类中存在CONSTRUCTOR（构造器元素），则不允许父类出现构造器元素
     boolean declaresConstructor = false;
     for (ResultMapping resultMapping : resultMappings) {
       if (resultMapping.getFlags().contains(ResultFlag.CONSTRUCTOR)) {
@@ -1925,6 +1925,7 @@ public ResultMap addResultMap(
         break;
       }
     }
+    //如果子类存在构造器，移除父类构造器
     if (declaresConstructor) {
       Iterator<ResultMapping> extendedResultMappingsIter = extendedResultMappings.iterator();
       while (extendedResultMappingsIter.hasNext()) {
@@ -1933,7 +1934,7 @@ public ResultMap addResultMap(
         }
       }
     }
-    //然后加入到resultMappings
+    //然后将父类的元素节点加入到子类的元素（resultMappings）
     resultMappings.addAll(extendedResultMappings);
   }
   ResultMap resultMap = new ResultMap.Builder(configuration, id, type, resultMappings, autoMapping)
@@ -2026,7 +2027,7 @@ public ResultMap build() {
     resultMap.idResultMappings.addAll(resultMap.resultMappings);
   }
   //---------------------------------------------------------------
-  //这里会判断参数类型，参数名称等（actualParamNames，就是<arg name="username"></arg>的name字段,如果不加name字段，就默认按照字段的顺序来）
+  //这里会判断参数类型，参数名称等（actualParamNames，就是<arg name="username"></arg>的name字段,如果不加name字段）
   if (!constructorArgNames.isEmpty()) {
     final List<String> actualArgNames = argNamesOfMatchingConstructor(constructorArgNames);
     if (actualArgNames == null) {
@@ -3753,7 +3754,11 @@ public class SqlSourceBuilder extends BaseBuilder {
 
 ![](mybatisimg\mybaits-sqlSessionFactory-create.png)
 
+2. resultMap注册
 
+![](mybatisimg\mybatis resultMap.png)
+
+3. sqlsource
 
 
 

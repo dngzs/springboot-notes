@@ -1,6 +1,5 @@
 package com.best.po;
 
-import org.apache.ibatis.type.Alias;
 
 public class User {
 

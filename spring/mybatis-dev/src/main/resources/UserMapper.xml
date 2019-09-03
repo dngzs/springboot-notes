@@ -12,7 +12,7 @@
         <id property="id" column="id" javaType="long" jdbcType="NUMERIC"></id>
         <result property="username" column="username" jdbcType="VARCHAR"
                 typeHandler="org.apache.ibatis.type.StringTypeHandler"></result>
-        <association property="book" select="com.best.dao.BookMapper.getById" column="id"></association>
+        <association property="book" select="com.best.dao.BookMapper.getByIdAndName" column="{id = id,userId = id}"></association>
         <discriminator javaType="int" column="sex">
             <case value="1" resultType="female"></case>
             <case value="0" resultType="male"></case>
