@@ -6,9 +6,8 @@ import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
-public interface UserMapper {
+public interface UserMapper extends BaseMapper<CtUser> {
 
-    CtUser getById(@Param("id") Long id);
 
     List<CtUser> getByIds(@Param("ids") List ids);
 

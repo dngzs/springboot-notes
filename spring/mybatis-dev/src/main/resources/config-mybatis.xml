@@ -16,6 +16,8 @@
         <setting name="jdbcTypeForNull" value="${jdbcTypeForNull}"/>
         <setting name="cacheEnabled" value="true"/>
         <setting name="autoMappingBehavior" value="FULL"/>
+        <setting name="useActualParamName" value="false"/>
+
     </settings>
 
     <typeAliases>

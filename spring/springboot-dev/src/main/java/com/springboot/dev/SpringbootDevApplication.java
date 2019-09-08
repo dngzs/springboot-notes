@@ -1,5 +1,6 @@
 package com.springboot.dev;
 
+import com.ctrip.framework.apollo.spring.annotation.EnableApolloConfig;
 import com.springboot.dev.vo.Car;
 import com.springboot.dev.vo.User;
 import org.springframework.boot.SpringApplication;
@@ -7,6 +8,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 
 @SpringBootApplication
+@EnableApolloConfig
 public class SpringbootDevApplication {
 
     public static void main(String[] args) {

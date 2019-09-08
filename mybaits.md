@@ -1,4 +1,4 @@
-# mybaits源码分析系列
+# promybaits源码分析系列
 
 ### 一、容器的加载与初始化以及Configuration
 
@@ -2303,7 +2303,7 @@ public MappedStatement addMappedStatement(
   if (unresolvedCacheRef) {
     throw new IncompleteElementException("Cache-ref not yet resolved");
   }
-  //获取sql的id
+  //获取curd的id
   id = applyCurrentNamespace(id, false);
   //是不是select
   boolean isSelect = sqlCommandType == SqlCommandType.SELECT;
@@ -2320,7 +2320,7 @@ public MappedStatement addMappedStatement(
       .lang(lang)
       .resultOrdered(resultOrdered)
       .resultSets(resultSets)
-      //这里去configuration去拿resultMap，也可能拿不到，因为resultMap还没初始化，IncompleteElementException
+      //这里去configuration去拿resultMap，也可能拿不到，因为这里resultMap还没初始化好，IncompleteElementException
       .resultMaps(getStatementResultMaps(resultMap, resultType, id))
       .resultSetType(resultSetType)
       .flushCacheRequired(valueOrDefault(flushCache, !isSelect))
@@ -3519,7 +3519,7 @@ public class DynamicContext {
       MetaObject metaObject = configuration.newMetaObject(parameterObject);
       bindings = new ContextMap(metaObject);
     } else {
-      //ContextMap，又是一个对弈hashmap的封装
+      //ContextMap，又是一个对于hashmap的封装
       bindings = new ContextMap(null);
     }
     //ContextMap bindings加入_parameter和_databaseId，后续参数设置要用到（静态sql这里设置的是空）
@@ -3758,80 +3758,619 @@ public class SqlSourceBuilder extends BaseBuilder {
 
 ![](mybatisimg\mybatis resultMap.png)
 
-3. MappedStatement解析与注册
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-1. XMLIncludeTransformer：解析<include>节点的
-
-
-
-
-
+3. sqlSource解析与注册
+
+![](C:\Users\Administrator\Desktop\springboot-notes\mybatisimg\mybatis-sqlsource.png)
+
+感想：MixedSqlNode
+
+MixedSqlNode实现了SqlNode，相对于其他的IfSqlNode和whereSqlNode等等不太一样，MixedSqlNode其实没有干什么事情，成员里面有一个List<SqlNode>保存着解析到的其他sqlNode。用来循环解析其他的sqlNode的，其实是值得我们学习的
+
+4. 对于MappedStatement的解析图解就不分析了，比较的简单
+
+至此，对于Configuration的创建就这样解析完了，同时根据Configuration也
+
+
+
+## 二、SqlSession的获取
+
+之前我们看过了SqlSessionFactory，SqlSessionFactory是线程安全的，而对于SqlSession来说并不是线程安全的，先来看下sqlSession的接口定义
+
+```java
+public interface SqlSession extends Closeable {
+
+   //根据statement查询单条记录
+  <T> T selectOne(String statement);
+  //根据statement和参数查询单条记录
+  <T> T selectOne(String statement, Object parameter);
+  //根据statement查询多条记录
+  <E> List<E> selectList(String statement);
+  //根据statement和参数查询多条记录
+  <E> List<E> selectList(String statement, Object parameter);
+  //根据statement和参数以及分页参数查询多条记录
+  <E> List<E> selectList(String statement, Object parameter, RowBounds rowBounds);
+    
+  //selectMap和selectList原理一样,只是将结果集映射成Map对象返回
+  <K, V> Map<K, V> selectMap(String statement, String mapKey);
+  <K, V> Map<K, V> selectMap(String statement, Object parameter, String mapKey);
+  <K, V> Map<K, V> selectMap(String statement, Object parameter, String mapKey, RowBounds rowBounds);
+
+ //返回游标对象
+  <T> Cursor<T> selectCursor(String statement);
+  <T> Cursor<T> selectCursor(String statement, Object parameter);
+  <T> Cursor<T> selectCursor(String statement, Object parameter, RowBounds rowBounds);
+    
+  //查询的结果对象由指定的ResultHandler处理
+  void select(String statement, Object parameter, ResultHandler handler);
+  void select(String statement, ResultHandler handler);
+  void select(String statement, Object parameter, RowBounds rowBounds, ResultHandler handler);
+
+  //执行insert语句
+  int insert(String statement);
+  int insert(String statement, Object parameter);
+  
+   //执行update语句
+  int update(String statement);
+  int update(String statement, Object parameter);
+
+  //执行delete语句 
+  int delete(String statement);
+  int delete(String statement, Object parameter);
+
+  //提交事务
+  void commit();
+  void commit(boolean force);
+
+  //事务回滚
+  void rollback();  
+  void rollback(boolean force);
+
+  //将请求刷新到数据库
+  List<BatchResult> flushStatements();
+
+  //关闭sqlSession
+  @Override
+  void close();
+    
+  //清除缓存  
+  void clearCache();
+
+  //获取Configuration对象
+  Configuration getConfiguration();
+  //获取Type对象的Mapper对象
+  <T> T getMapper(Class<T> type);
+    
+  //获取数据库连接
+  Connection getConnection();
+}
 ```
-GenericTokenParser   ---  解析带${}和#{}的字符串的
+
+再来看看接口的实现
+
+![](mybatisimg\13.png)
+
+其中SqlSessionTemplate是mybatis-spring对于sqlSession的实现
+
+DefaultSqlSession和SqlSessionManager是mybatis自己的实现
+
+SqlSessionManager我们之前就已经看过，它主要的就是事务的提交可以自己手动提交回滚来实现，而且多条sql执行可以用一个SqlSession来执行
+
+DefaultSqlSession则是mybatis对于SqlSession默认实现，我们后续再看
+
+### 2.1 sqlSession的获取
+
+sqlSession的获取主要是通过sqlSessionFactory的openSession方法来获取的，我们来看下
+
+DefaultSqlSessionFactory#openSession()
+
+```java
+@Override
+public SqlSession openSession() {
+  return openSessionFromDataSource(configuration.getDefaultExecutorType(), null, false);
+}
 ```
+
+```java
+private SqlSession openSessionFromDataSource(ExecutorType execType, TransactionIsolationLevel level, boolean autoCommit) {
+  Transaction tx = null;
+  try {
+    //获取环境（该环境在读取mybaits文件的时候生成的）
+    final Environment environment = configuration.getEnvironment();
+    //从环境中获取事务管理器
+    final TransactionFactory transactionFactory = getTransactionFactoryFromEnvironment(environment);
+    tx = transactionFactory.newTransaction(environment.getDataSource(), level, autoCommit);
+    //根据事务管理器，创建一个Executor
+    final Executor executor = configuration.newExecutor(tx, execType);
+    //然后生成了一个DefaultSqlSession
+    return new DefaultSqlSession(configuration, executor, autoCommit);
+  } catch (Exception e) {
+    closeTransaction(tx); // may have fetched a connection so lets call close()
+    throw ExceptionFactory.wrapException("Error opening session.  Cause: " + e, e);
+  } finally {
+    ErrorContext.instance().reset();
+  }
+}
+```
+
+```java
+public Executor newExecutor(Transaction transaction, ExecutorType executorType) {
+  //如果ExecutorType是空的，则设置executorType为simple
+  executorType = executorType == null ? defaultExecutorType : executorType;
+  executorType = executorType == null ? ExecutorType.SIMPLE : executorType;
+  Executor executor;
+  //如果是batch的，生成一个BatchExecutor
+  if (ExecutorType.BATCH == executorType) {
+    executor = new BatchExecutor(this, transaction);
+    //如果是REUSE则生成一个ReuseExecutor
+  } else if (ExecutorType.REUSE == executorType) {
+    executor = new ReuseExecutor(this, transaction);
+  } else {
+    //否则就生成一个简单SimpleExecutor
+    executor = new SimpleExecutor(this, transaction);
+  }
+  //判断是不是存在二级缓存，如果是，就将Executor包装成CachingExecutor，这里又用到了装饰器设计模式
+  if (cacheEnabled) {
+    executor = new CachingExecutor(executor);
+  }
+  //在这里执行了插件的pluginAll方法，获取到一个经过代理的executor
+  executor = (Executor) interceptorChain.pluginAll(executor);
+  return executor;
+}
+```
+
+在这里，mybatis的第一大组件出来了 ==Executor==，Executor存在几种形态的方式
+
+```java
+public enum ExecutorType {
+  SIMPLE, REUSE, BATCH
+}
+```
+
+> 1. 默认的是simple，在该模式下它为==每个语句的执行创建一个新的预处理语句（PreparedStatements），单条提交sql==
+>
+> 2. REUSE  这种类型将重复使用PreparedStatements
+> 3. BATCH  重复使用已经预处理的语句，并且批量执行所有更新语句，在批量执行sql方面，batch性能更优秀一点
+>
+> 但batch模式也有问题，比如在Insert操作时，在事务没有提交之前，是没有办法获取到自增的id，这在某型情形下是不符合业务要求的；
+
+默认情况下Executor类型是SIMPLE的
+
+至此，sqlSession对象就创建好了
+
+## 三、 Mapper的获取
+
+```java
+UserMapper mapper = sqlSession.getMapper(UserMapper.class);
+```
+
+这句话我们再熟悉不过了，这就是获取mapper的方法
+
+我们进入mybatis的默认sqlSession的实现==DefaultSqlSession==，看看getMapper怎么实现的
+
+DefaultSqlSession#getMapper
+
+```java
+@Override
+public <T> T getMapper(Class<T> type) {
+  return configuration.<T>getMapper(type, this);
+}
+```
+
+它调用了configuration的getMapper方法，继续跟进
+
+configuration#getMapper
+
+```java
+public <T> T getMapper(Class<T> type, SqlSession sqlSession) {
+  return mapperRegistry.getMapper(type, sqlSession);
+}
+```
+
+从我们的mapper注册中心中获取Mapper，我们在mybatis configuration的生成阶段已经将curd以Mapper的方式注册到mapperRegistry中去了
+
+MapperRegistry#getMapper
+
+```java
+@SuppressWarnings("unchecked")
+public <T> T getMapper(Class<T> type, SqlSession sqlSession) {
+  //很简单，那就是从我们之前注册的地方获取到，最终返回一个MapperProxyFactory对象
+  final MapperProxyFactory<T> mapperProxyFactory = (MapperProxyFactory<T>) knownMappers.get(type);
+  if (mapperProxyFactory == null) {
+    throw new BindingException("Type " + type + " is not known to the MapperRegistry.");
+  }
+  try {
+     //生成一个mapper class（也就是我们的接口）
+    return mapperProxyFactory.newInstance(sqlSession);
+  } catch (Exception e) {
+    throw new BindingException("Error getting mapper instance. Cause: " + e, e);
+  }
+}
+```
+
+### 3.1 MapperProxyFactory
+
+在这里我决定着重分享下MapperProxyFactory对象
+
+```java
+public class MapperProxyFactory<T> {
+
+  private final Class<T> mapperInterface;
+  private final Map<Method, MapperMethod> methodCache = new ConcurrentHashMap<Method, MapperMethod>();
+
+  public MapperProxyFactory(Class<T> mapperInterface) {
+    this.mapperInterface = mapperInterface;
+  }
+
+  public Class<T> getMapperInterface() {
+    return mapperInterface;
+  }
+
+  public Map<Method, MapperMethod> getMethodCache() {
+    return methodCache;
+  }
+
+  @SuppressWarnings("unchecked")
+  protected T newInstance(MapperProxy<T> mapperProxy) {
+    return (T) Proxy.newProxyInstance(mapperInterface.getClassLoader(), new Class[] { mapperInterface }, mapperProxy);
+  }
+
+  public T newInstance(SqlSession sqlSession) {
+    final MapperProxy<T> mapperProxy = new MapperProxy<T>(sqlSession, mapperInterface, methodCache);
+    return newInstance(mapperProxy);
+  }
+
+}
+```
+
+我们看到，在上面的调用中调用了newInstance(SqlSession sqlSession) 方法
+
+这个方法的作用就是生成一个MapperProxy对象，并且执行了
+
+```java
+ return (T) Proxy.newProxyInstance(mapperInterface.getClassLoader(), new Class[] { mapperInterface }, mapperProxy);
+```
+
+生成了一个代理，代理的就是我们的mapper（接口）, 并返回，这样我们的mapper接口就获取到了
+
+
+
+## 四、SQL语句执行
+
+上述我们得到了我们mapper对象，我们知道这个mapper对象实际上是个代理类，当我们执行到
+
+```java
+bookMapper.getById(1L)
+```
+
+时，我们来看下，这个代理类做了些什么事情，那么我们就去看下这个MapperProxy到底干了什么事情。代理的InvocationHandler就是这个MapperProxy，我们去看看InvocationHandler干了些什么事情。
+
+我们主要来看下这个invoke方法
+
+### 4.1  MapperProxy
+
+```java
+public class MapperProxy<T> implements InvocationHandler, Serializable {
+
+  private static final long serialVersionUID = -6424540398559729838L;
+  //保存了SqlSession
+  private final SqlSession sqlSession;
+  //保存了我们这个代理的接口
+  private final Class<T> mapperInterface;
+  //缓存了这个methodCache
+  private final Map<Method, MapperMethod> methodCache;
+
+  public MapperProxy(SqlSession sqlSession, Class<T> mapperInterface, Map<Method, MapperMethod> methodCache) {
+    this.sqlSession = sqlSession;
+    this.mapperInterface = mapperInterface;
+    this.methodCache = methodCache;
+  }
+
+  @Override
+  public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+    try {
+      //如果方法的是Object的方法，则不代理
+      if (Object.class.equals(method.getDeclaringClass())) {
+        return method.invoke(this, args);
+        //判断是否是默认方法，默认方法是Java8的新特性，判断逻辑与Java8 Method类的isDefault方法一样
+      } else if (isDefaultMethod(method)) {
+        return invokeDefaultMethod(proxy, method, args);
+      }
+    } catch (Throwable t) {
+      throw ExceptionUtil.unwrapThrowable(t);
+    }
+    
+    final MapperMethod mapperMethod = cachedMapperMethod(method);
+    return mapperMethod.execute(sqlSession, args);
+  }
+
+  private MapperMethod cachedMapperMethod(Method method) {
+    //查看methodCache有没有MapperMethod
+    MapperMethod mapperMethod = methodCache.get(method);
+    if (mapperMethod == null) {
+       //如果没有就new一个
+      mapperMethod = new MapperMethod(mapperInterface, method, sqlSession.getConfiguration());
+      methodCache.put(method, mapperMethod);
+    }
+    return mapperMethod;
+  }
+
+   //调用默认方法，这里面用到了Java7的API，有兴趣的读者可以自行了解
+  @UsesJava7
+  private Object invokeDefaultMethod(Object proxy, Method method, Object[] args)
+      throws Throwable {
+    final Constructor<MethodHandles.Lookup> constructor = MethodHandles.Lookup.class
+        .getDeclaredConstructor(Class.class, int.class);
+    if (!constructor.isAccessible()) {
+      constructor.setAccessible(true);
+    }
+    final Class<?> declaringClass = method.getDeclaringClass();
+    return constructor
+        .newInstance(declaringClass,
+            MethodHandles.Lookup.PRIVATE | MethodHandles.Lookup.PROTECTED
+                | MethodHandles.Lookup.PACKAGE | MethodHandles.Lookup.PUBLIC)
+        .unreflectSpecial(method, declaringClass).bindTo(proxy).invokeWithArguments(args);
+  }
+
+  /**
+   * getModifiers
+   */
+  private boolean isDefaultMethod(Method method) {
+    //接口的method.getModifiers() public (1) + abstract(1024) = 1025
+   //(Modifier.ABSTRACT | Modifier.PUBLIC | Modifier.STATIC)) = 1033,而1033代表着判断不是abstract，也不是static的public方法，并且是一个接口，那么这里判断的不就是java8的默认方法吗？
+    return (method.getModifiers()
+        & (Modifier.ABSTRACT | Modifier.PUBLIC | Modifier.STATIC)) == Modifier.PUBLIC
+        && method.getDeclaringClass().isInterface();
+  }
+}
+```
+
+这里我们来回顾下JAVA 反射机制 **method.getModifiers**
+
+> **JAVA 反射机制中，method的getModifiers()方法返回int类型值表示该字段的修饰符。**
+>
+> **对应表如下：**
+>
+> public : 1
+>
+> private : 2
+>
+> protected: 4
+>
+> static: 8
+>
+> final : 16
+>
+> synchronized: 32
+>
+> VOLATILE: 64
+>
+> transient: 128
+>
+> native: 256
+>
+> interface : 512
+>
+> abstract : 1024
+>
+> strict : 2048
+
+
+
+MapperMethod#构造器MapperMethod（）
+
+```java
+public MapperMethod(Class<?> mapperInterface, Method method, Configuration config) {
+  //生成了SqlCommand对象
+  this.command = new SqlCommand(config, mapperInterface, method);
+  //生成了MethodSignature对象
+  this.method = new MethodSignature(config, mapperInterface, method);
+}
+```
+
+### 4.2 SqlCommand
+
+**sqlCommand主要就是解析这个方法到底执行的是什么操作（select ,update , insert , flush）**,并且把执行的MappedStatement全路径名拿到
+
+SqlCommand#构造器SqlCommand
+
+```java
+public SqlCommand(Configuration configuration, Class<?> mapperInterface, Method method) {
+  //获取方法名称
+  final String methodName = method.getName();
+  //获取方法的类
+  final Class<?> declaringClass = method.getDeclaringClass();
+  //这里解析到MappedStatement对象（从configuration）中拿的
+  MappedStatement ms = resolveMappedStatement(mapperInterface, methodName, declaringClass,
+      configuration);
+  //如果ms等于空，那么就查看是不是存在@Flush注解，如果存在，就将type标注为SqlCommandType.FLUSH
+  if (ms == null) {
+    if (method.getAnnotation(Flush.class) != null) {
+      name = null;
+      type = SqlCommandType.FLUSH;
+    } else {
+      //啥都没有，那就找不到statment呗
+      throw new BindingException("Invalid bound statement (not found): "
+          + mapperInterface.getName() + "." + methodName);
+    }
+  } else {
+    //如果能找到，就拿到id
+    name = ms.getId();
+    //获取到sql类型
+    type = ms.getSqlCommandType();
+    //如果sql类型是Unknown，则直接报错
+    if (type == SqlCommandType.UNKNOWN) {
+      throw new BindingException("Unknown execution method for: " + name);
+    }
+  }
+}
+```
+
+MapperMethod#resolveMappedStatement
+
+该方法主要获取映射语句所构成的对象，该对象已经在mapper文件解析的时候设置到configuration对象中去了，获取的流程大致是这样的
+
+1. 获取待执行语句的id号,id号形式为类路径.方法名
+2. 从Configuration中找，如果能找到就直接返回；如果找不到就从父类中找，递归查找
+
+3. 如果入参接口路径就是方法所在的类路径,那么直接返回NULL
+
+```java
+private MappedStatement resolveMappedStatement(Class<?> mapperInterface, String methodName,
+      Class<?> declaringClass, Configuration configuration) {
+    String statementId = mapperInterface.getName() + "." + methodName;
+    if (configuration.hasStatement(statementId)) {
+      return configuration.getMappedStatement(statementId);
+    } else if (mapperInterface.equals(declaringClass)) {
+      return null;
+    }
+    for (Class<?> superInterface : mapperInterface.getInterfaces()) {
+      if (declaringClass.isAssignableFrom(superInterface)) {
+        MappedStatement ms = resolveMappedStatement(superInterface, methodName,
+            declaringClass, configuration);
+        if (ms != null) {
+          return ms;
+        }
+      }
+    }
+    return null;
+  }
+}
+```
+
+### 4.3 MethodSignature
+
+MethodSignature为MapperMethod类提供了三个作用
+
+1. 获取待执行方法中的参数和@Param注解标注的参数名
+2. 获取标注有@MapKey的参数
+3. 获取方法的返回值类型
+
+分析下MethodSignature对象
+
+```java
+public static class MethodSignature {
+    //是否多值查询
+    private final boolean returnsMany;
+    //是否map查询
+    private final boolean returnsMap;
+    //是否void查询
+    private final boolean returnsVoid;
+    //是否游标查询
+    private final boolean returnsCursor;
+    //返回值类型
+    private final Class<?> returnType;
+    //获取mapKey的值
+    private final String mapKey;
+    
+    private final Integer resultHandlerIndex;
+    private final Integer rowBoundsIndex;
+    //参数解析器
+    private final ParamNameResolver paramNameResolver;
+
+    public MethodSignature(Configuration configuration, Class<?> mapperInterface, Method method) {
+      //获取返回值类型 ParameterizedType,TypeVariable,GenericArrayType
+      Type resolvedReturnType = TypeParameterResolver.resolveReturnType(method, mapperInterface);
+      if (resolvedReturnType instanceof Class<?>) {
+        this.returnType = (Class<?>) resolvedReturnType;
+      } else if (resolvedReturnType instanceof ParameterizedType) {
+        this.returnType = (Class<?>) ((ParameterizedType) resolvedReturnType).getRawType();
+      } else {
+        this.returnType = method.getReturnType();
+      }
+      //返回值类型是不是void
+      this.returnsVoid = void.class.equals(this.returnType);
+      //是否是多值查询
+      this.returnsMany = configuration.getObjectFactory().isCollection(this.returnType) || this.returnType.isArray();
+      //是不是游标类型
+      this.returnsCursor = Cursor.class.equals(this.returnType);
+      //获取MapKey注解
+      this.mapKey = getMapKey(method);
+      ///判断mapkey是否不为NULL
+      this.returnsMap = this.mapKey != null;
+      //获取参数中RowBounds类型的位置，如果参数中包含多个RowBounds类型参数，也会抛异常
+      this.rowBoundsIndex = getUniqueParamIndex(method, RowBounds.class);
+      //获取ResultHandler类型参数的位置
+      this.resultHandlerIndex = getUniqueParamIndex(method, ResultHandler.class);
+      //生成一个参数名称解析器
+      this.paramNameResolver = new ParamNameResolver(configuration, method);
+    }
+   
+    private String getMapKey(Method method) {
+      //看下返回值是不是map类型的
+      String mapKey = null;
+      if (Map.class.isAssignableFrom(method.getReturnType())) {
+        //如果是map类型的就获取下MapKey注解的mapKey
+        final MapKey mapKeyAnnotation = method.getAnnotation(MapKey.class);
+        if (mapKeyAnnotation != null) {
+          mapKey = mapKeyAnnotation.value();
+        }
+      }
+      //如果拿不到就返回null
+      return mapKey;
+    }
+  }
+
+}
+```
+
+### 4.4 ParamNameResolver 参数名称解析器
+
+```java
+public ParamNameResolver(Configuration config, Method method) 
+  //所有参数的参数类型
+  final Class<?>[] paramTypes = method.getParameterTypes();
+  //获取方法参数的参数注解
+  final Annotation[][] paramAnnotations = method.getParameterAnnotations();
+  //treeMap
+  final SortedMap<Integer, String> map = new TreeMap<Integer, String>();
+  //获取有几个参数注解
+  int paramCount = paramAnnotations.length;
+  // get names from @Param annotations
+  for (int paramIndex = 0; paramIndex < paramCount; paramIndex++) {
+    //参数类型是不是RowBounds或者ResultHandler
+    if (isSpecialParameter(paramTypes[paramIndex])) {
+      //如果是，则直接跳过
+      continue;
+    }
+    String name = null;
+    //遍历注解
+    for (Annotation annotation : paramAnnotations[paramIndex]) {
+       //如果注解是@Param注解
+      if (annotation instanceof Param) {
+        //则标注有Param注解的
+        hasParamAnnotation = true;
+        //并且拿到参数的名字
+        name = ((Param) annotation).value();
+        break;
+      }
+    }
+    //如果此时，名字还是空的
+    if (name == null) {
+      // @Param没有指定
+      if (config.isUseActualParamName()) {
+        //根据jdk8的获取参数名称获取
+        name = getActualParamName(method, paramIndex);
+      }
+      //如果名称还是空的
+      if (name == null) {
+        // 则使用索引作为名称（1,2,3...）
+        name = String.valueOf(map.size());
+      }
+    }
+    map.put(paramIndex, name);
+  }
+  names = Collections.unmodifiableSortedMap(map);
+}
+
+private static boolean isSpecialParameter(Class<?> clazz) {
+    return RowBounds.class.isAssignableFrom(clazz) || ResultHandler.class.isAssignableFrom(clazz);
+  }
+```
+
+这里如果获取不到参数名，那就获取到的是arg0之类的
+
+![1567953591565](mybatisimg\14.png)
+
+如果**useActualParamName**设置的是false , 那么得到的只能是参数的索引值了
+
+![](mybatisimg\15.png)

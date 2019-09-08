@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!--<include resource="org/springframework/boot/logging/logback/base.xml"/>-->
+    <!-- 定义log文件的目录 不建议使用相对路径-->
+    <springProperty scope="context" name="root" source="logger.root" defaultValue="/logs/ecosphere"/>
+    <springProperty scope="context" name="serviceList" source="logger.serviceList" defaultValue="localhost"/>
+    <springProperty scope="context" name="appName" source="logger.appName" defaultValue="appname"/>
+
+    <property name="LOG_HOME" value="${root}"/>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <!-- %.-1level 只显示信息级别的首字母,%-5level 左对齐显示信息级别全称 -->
+            <Pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{50}[%L] - %msg%n</Pattern>
+        </encoder>
+    </appender>
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <File>${LOG_HOME}/out.log</File>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <!--日志文件输出的文件名-->
+            <FileNamePattern>${LOG_HOME}/ecosphere-%d{yyyy-MM-dd}.%i.log</FileNamePattern>
+            <!--日志文件保留天数-->
+            <MaxHistory>30</MaxHistory>
+            <!--每个文件大小-->
+            <MaxFileSize>20MB</MaxFileSize>
+        </rollingPolicy>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <!--格式化输出：%d表示日期，%thread表示线程名，%-5level：级别从左显示5个字符宽度%msg：日志消息，%n是换行符-->
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{50}[%L] - %msg%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <logger name="druid.sql" level="INFO"/>
+    <logger name="druid.sql.DataSource" level="INFO"/>
+    <logger name="druid.sql.Connection" level="INFO"/>
+    <logger name="druid.sql.Statement" level="INFO"/>
+    <logger name="druid.sql.ResultSet" level="INFO"/>
+
+    <!-- 显示SQL内容： 调试用 -->
+    <!--<logger name="com.best.ecosphere.dao.mapper" level="DEBUG" />-->
+
+    <root level="debug" name="root">
+                <!--输出日志到文件-->
+             
+               
+        <appender-ref ref="STDOUT"/>
+           
+    </root>
+
+</configuration>
