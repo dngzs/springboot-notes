@@ -2,6 +2,8 @@ package com.best;
 
 
 import com.best.service.UserService;
+import com.best.tranction.ServiceB;
+import com.best.tranction.ServiceC;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.support.ClassPathXmlApplicationContext;
 
@@ -24,8 +26,8 @@ public class App
 
         /*-------------------------------*/
 
-        UserService bean3 = applicationContext.getBean(UserService.class);
-        System.out.println(bean3.test1());
+        ServiceC bean3 = applicationContext.getBean(ServiceC.class);
+        bean3.dosomethingC();
         //com.best.service.A bean4 = applicationContext.getBean(com.best.service.A.class);
         //bean4.b();
     }
