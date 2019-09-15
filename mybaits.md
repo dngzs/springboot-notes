@@ -3760,7 +3760,7 @@ public class SqlSourceBuilder extends BaseBuilder {
 
 3. sqlSource解析与注册
 
-![](C:\Users\Administrator\Desktop\springboot-notes\mybatisimg\mybatis-sqlsource.png)
+![](mybatisimg\mybatis-sqlsource.png)
 
 感想：MixedSqlNode
 
@@ -4080,6 +4080,7 @@ public class MapperProxy<T> implements InvocationHandler, Serializable {
     }
     
     final MapperMethod mapperMethod = cachedMapperMethod(method);
+      //执行
     return mapperMethod.execute(sqlSession, args);
   }
 
@@ -4374,3 +4375,141 @@ private static boolean isSpecialParameter(Class<?> clazz) {
 如果**useActualParamName**设置的是false , 那么得到的只能是参数的索引值了
 
 ![](mybatisimg\15.png)
+
+从分析我们可以了解到，在ParamNameResolver 初始化阶段，主要就是解析该方法的参数的名字，
+
+1. 参数存在@Param注解，则存成 key-value   paramIndex-name
+
+2. 不存在注解@Param注解，则存成 key-value  paramIndex-arg0
+3. useActualParamName都设置成false了，并且不存在@Param，则key-value  paramIndex-1
+
+### 4.5 MapperMethod执行过程
+
+```java
+ @Override
+  public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+    try {
+      if (Object.class.equals(method.getDeclaringClass())) {
+        return method.invoke(this, args);
+      } else if (isDefaultMethod(method)) {
+        return invokeDefaultMethod(proxy, method, args);
+      }
+    } catch (Throwable t) {
+      throw ExceptionUtil.unwrapThrowable(t);
+    }
+    
+    final MapperMethod mapperMethod = cachedMapperMethod(method);
+      //执行
+    return mapperMethod.execute(sqlSession, args);
+  }
+```
+
+我们主要来看下方法的执行过程 mapperMethod.execute(sqlSession, args)
+
+```java
+public Object execute(SqlSession sqlSession, Object[] args) {
+  Object result;
+  //从command中获取当前执行的是什么类型的sql
+  switch (command.getType()) {
+    case INSERT: {
+    Object param = method.convertArgsToSqlCommandParam(args);
+      result = rowCountResult(sqlSession.insert(command.getName(), param));
+      break;
+    }
+    case UPDATE: {
+      Object param = method.convertArgsToSqlCommandParam(args);
+      result = rowCountResult(sqlSession.update(command.getName(), param));
+      break;
+    }
+    case DELETE: {
+      Object param = method.convertArgsToSqlCommandParam(args);
+      result = rowCountResult(sqlSession.delete(command.getName(), param));
+      break;
+    }
+    case SELECT:
+       //判断是否是void类型的，并且方法参数上带有ResultHandler
+      if (method.returnsVoid() && method.hasResultHandler()) {
+        executeWithResultHandler(sqlSession, args);
+        result = null;
+        //是否返回来多行值
+      } else if (method.returnsMany()) {
+        result = executeForMany(sqlSession, args);
+        //是否返回map
+      } else if (method.returnsMap()) {
+        result = executeForMap(sqlSession, args);
+         //是否返回游标
+      } else if (method.returnsCursor()) {
+        result = executeForCursor(sqlSession, args);
+      } else {
+        //如果上述都不是，则处理参数
+        Object param = method.convertArgsToSqlCommandParam(args);
+        //调用sqlSession的selectOne操作
+        result = sqlSession.selectOne(command.getName(), param);
+      }
+      break;
+    case FLUSH:
+      result = sqlSession.flushStatements();
+      break;
+    default:
+      throw new BindingException("Unknown execution method for: " + command.getName());
+  }
+  if (result == null && method.getReturnType().isPrimitive() && !method.returnsVoid()) {
+    throw new BindingException("Mapper method '" + command.getName() 
+        + " attempted to return null from a method with a primitive return type (" + method.getReturnType() + ").");
+  }
+  return result;
+}
+```
+
+这里我们先来分析select的执行过程，后续再一个个分析
+
+来看下处理参数的过程
+
+```java
+public Object convertArgsToSqlCommandParam(Object[] args) {
+  //调用了参数解析器的getNamedParams方法
+  return paramNameResolver.getNamedParams(args);
+}
+```
+
+主要的参数解析方法ParamNameResolver#getNamedParams
+
+```java
+public Object getNamedParams(Object[] args) {
+  //获取参数个数
+  final int paramCount = names.size();
+   //如果参数是null或者参数个数是0，则直接返回
+  if (args == null || paramCount == 0) {
+    return null;
+    //如果不存在@param注解，并且参数个数是1，则直接拿取第一个参数
+  } else if (!hasParamAnnotation && paramCount == 1) {
+    return args[names.firstKey()];
+  } else {
+    //上面两种情况都不是，则new一个ParamMap
+    final Map<String, Object> param = new ParamMap<Object>();
+    int i = 0;
+    for (Map.Entry<Integer, String> entry : names.entrySet()) {
+      //以参数名为key,参数值为value存储到map中
+      param.put(entry.getValue(), args[entry.getKey()]);
+      //同时生成一个param1 param2....
+      final String genericParamName = GENERIC_NAME_PREFIX + String.valueOf(i + 1);
+      //判断names包含不包含，如果不包含，测以param1为key,参数值为value冗余一份也存入
+      if (!names.containsValue(genericParamName)) {
+        param.put(genericParamName, args[entry.getKey()]);
+      }
+      i++;
+    }
+    //返回参数值
+    return param;
+  }
+}
+```
+
+总结下参数解析的过程
+
+> 1.如果参数为空或者参数为0，则直接返回null
+>
+> 2.如果参数存在一个，但是并没有@param注解，则直接返回第一个参数
+>
+> 3.否则，解析初始化好的names值，以key为参数名，value为参数值，并且容易一份key为param1，valule值为参数值放入一个ParamMap中去
+
