@@ -4383,7 +4383,7 @@ private static boolean isSpecialParameter(Class<?> clazz) {
 2. 不存在注解@Param注解，则存成 key-value  paramIndex-arg0
 3. useActualParamName都设置成false了，并且不存在@Param，则key-value  paramIndex-1
 
-### 4.5 MapperMethod执行过程
+### 4.5 MapperMethod执行过程以及参数解析
 
 ```java
  @Override
@@ -4512,4 +4512,6 @@ public Object getNamedParams(Object[] args) {
 > 2.如果参数存在一个，但是并没有@param注解，则直接返回第一个参数
 >
 > 3.否则，解析初始化好的names值，以key为参数名，value为参数值，并且容易一份key为param1，valule值为参数值放入一个ParamMap中去
+
+###  4.6 sqlsession的selectOne selectList的执行过程
 

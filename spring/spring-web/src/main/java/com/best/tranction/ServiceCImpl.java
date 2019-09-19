@@ -13,6 +13,11 @@ public class ServiceCImpl implements ServiceC {
     @Override
     @Transactional
     public void dosomethingC() {
-        serviceB.dosomethingB();
+        try {
+            serviceB.dosomethingB();
+        }catch (RuntimeException e){
+            e.printStackTrace();
+        }
+
     }
 }

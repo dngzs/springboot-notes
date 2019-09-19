@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:rabbit="http://www.springframework.org/schema/rabbit"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans  http://www.springframework.org/schema/beans/spring-beans.xsd
+    http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-3.2.xsd
+    http://www.springframework.org/schema/rabbit http://www.springframework.org/schema/rabbit/spring-rabbit-1.6.xsd ">
+
+    <context:annotation-config/>
+    <context:component-scan base-package="com.best.spring"/>
+
+    <!-- 配置ConnectionFactory -->
+    <rabbit:connection-factory id="connectionFactory"
+                               host="127.0.0.1" username="guest" password="guest" port="5672" />
+
+    <!-- 等同new一个RabbitAdmin -->
+    <rabbit:admin connection-factory="connectionFactory" />
+
+    <!-- 声明一个队列 -->
+    <rabbit:queue name="myQueue" />
+
+    <!-- 声明一个topic类型的exchange，并把上面声明的队列绑定在上面，routingKey="foo.*" -->
+    <rabbit:topic-exchange name="myExchange">
+        <rabbit:bindings>
+            <rabbit:binding queue="myQueue" pattern="foo.*" />
+            <!-- 这里还可以继续绑定其他队列 -->
+        </rabbit:bindings>
+    </rabbit:topic-exchange>
+
+    <!-- 声明一个rabbitTemplate，指定连接信息，发送消息到myExchange上，routingKey在程序中设置，此处的配置在程序中可以用set修改 -->
+    <rabbit:template id="amqpTemplate" connection-factory="connectionFactory"
+                     exchange="myExchange"/>
+
+    <!-- 配置监听容器，指定消息处理类，处理方法，还可以配置自动确认等-->
+    <rabbit:listener-container connection-factory="connectionFactory" acknowledge="auto"  concurrency="1" max-concurrency="1" prefetch="1">
+        <rabbit:listener  queue-names="myQueue" ref="consumerListener2"  method="onMessage"/>
+        <!-- 可以继续注册监听 -->
+    </rabbit:listener-container>
+
+    <bean id="msgConverter" class="org.springframework.amqp.support.converter.SimpleMessageConverter" />
+
+</beans>
