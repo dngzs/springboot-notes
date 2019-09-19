@@ -4515,3 +4515,82 @@ public Object getNamedParams(Object[] args) {
 
 ###  4.6 sqlsession的selectOne selectList的执行过程
 
+在mybatis中，默认的sqlSession实现用的DefaultSqlSession，那我们重点来看下DefaultSqlSession的处理过程
+
+```java
+@Override
+public <T> T selectOne(String statement, Object parameter) {
+  // 调用selectList去执行selectOne操作
+  List<T> list = this.<T>selectList(statement, parameter);
+  if (list.size() == 1) {
+    //如果是一个就返回
+    return list.get(0);
+  } else if (list.size() > 1) {
+    //如果是多个就直接抛错
+    throw new TooManyResultsException("Expected one result (or null) to be returned by selectOne(), but found: " + list.size());
+  } else {
+    return null;
+  }
+}
+```
+
+可以看到，selectOne是通过selectList来实现的，那么我们继续跟进代码
+
+```java
+@Override
+public <E> List<E> selectList(String statement, Object parameter) {
+  return this.selectList(statement, parameter, RowBounds.DEFAULT);
+}
+```
+
+可以看到mybatis在查询的时候，默认加了一个RowBounds，这个RowBounds是用来给mybatis做逻辑分页的，用处不是特别大
+
+```java
+@Override
+public <E> List<E> selectList(String statement, Object parameter, RowBounds rowBounds) {
+  try {
+    //在这里我们就拿到在mapper初始化加载的时候加载MappedStatement对象了
+    MappedStatement ms = configuration.getMappedStatement(statement);
+    //调用了executor的query方法来执行，此处方法调用，默认加了一个空的ResultHandler
+    return executor.query(ms, wrapCollection(parameter), rowBounds, Executor.NO_RESULT_HANDLER);
+  } catch (Exception e) {
+    throw ExceptionFactory.wrapException("Error querying database.  Cause: " + e, e);
+  } finally {
+    ErrorContext.instance().reset();
+  }
+}
+```
+
+注意，在此处调用了一个wrapCollection(parameter)，从名字意义上看就是包装集合参数
+
+```java
+private Object wrapCollection(final Object object) {
+  //判断参数是不是集合类型的，当然基本上这里封装的都是map了，当是多个参数的时候
+  if (object instanceof Collection) {
+    StrictMap<Object> map = new StrictMap<Object>();
+    //生成一个map,加入以key为collection，value为参数的方式加入
+    map.put("collection", object);
+    if (object instanceof List) {
+      //如果是list,再冗余添加一个key为list的数据
+      map.put("list", object);
+    }
+    return map;
+    //如果不是集合类型，并且不是空，而且是个数组
+  } else if (object != null && object.getClass().isArray()) {
+    StrictMap<Object> map = new StrictMap<Object>();
+    //则以array作为key，将参数加入到map中去
+    map.put("array", object);
+    return map;
+  }
+  return object;
+}
+```
+
+可以看到mybatis在这里做了一次封装，判断传入的参数类型是不是集合或者数组的，如果是，就将参数封装成一个map
+
+
+
+总结：至此，mybatis select和select就说完了，在这个步骤中，DefaultSqlSession包装了下集合类型的参数，并且将逻辑分页组件RowBounds和空的ResultHandler传入executor中，委托Executor做了底层的查询，至此mybaits的第二大对象引入Executor
+
+### 4  Executor的执行过程
+
