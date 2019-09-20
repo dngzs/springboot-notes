@@ -12,7 +12,7 @@
     </resultMap>
 
     <select id="getById" resultType="book" parameterType="Long">
-        select * from ct_book where id = #{id}
+        select * from ct_book where id = #{id:NUMERIC}
     </select>
 
     <select id="getByIdAndName" resultType="book" parameterType="map">

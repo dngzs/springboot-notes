@@ -29,7 +29,6 @@ public class MessageConsumer {
             //这里声明queue是为了取消息的时候，queue肯定会存在
             //注意，queueDeclare是幂等的，也就是说，消费者和生产者，不论谁先声明，都只会有一个queue
             channel.queueDeclare(queueName, false, false, false, null);
-
             //这里重写了DefaultConsumer的handleDelivery方法，因为发送的时候对消息进行了getByte()，在这里要重新组装成String
             Consumer consumer = new DefaultConsumer(channel){
                 @Override

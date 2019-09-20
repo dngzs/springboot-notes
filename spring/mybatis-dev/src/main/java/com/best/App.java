@@ -32,7 +32,7 @@ public class App {
         List ids = new ArrayList();
         ids.add(1L);
         ids.add(2L);
-        CtUser byId = mapper.getById(1L);
+        CtUser byId = mapper.getById(null);
 
         BookMapper bookMapper = sqlSession.getMapper(BookMapper.class);
         Book book = bookMapper.getById(1L);

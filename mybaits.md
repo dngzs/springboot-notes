@@ -4590,7 +4590,9 @@ private Object wrapCollection(final Object object) {
 
 
 
-总结：至此，mybatis select和select就说完了，在这个步骤中，DefaultSqlSession包装了下集合类型的参数，并且将逻辑分页组件RowBounds和空的ResultHandler传入executor中，委托Executor做了底层的查询，至此mybaits的第二大对象引入Executor
+总结：至此，mybatis select和select就说完了，在这个步骤中，DefaultSqlSession包装了下集合类型的参数，并且将逻辑分页组件RowBounds和空的ResultHandler传入executor中，委托Executor做了底层的查询
 
 ### 4  Executor的执行过程
+
+Executor上面我们已经说到，存在三种类型的Executor，如果存在缓存，还存在第四种类型的，一个个来分析，先来分析CachingExecutor和SimpleExecutor
 
