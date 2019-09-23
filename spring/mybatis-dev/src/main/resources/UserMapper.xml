@@ -56,12 +56,14 @@
     6.type:自定义缓存策略（默认PERPETUAL，采用hashMap缓存）
      可指定使用的缓存类，mybatis默认使用HashMap进行缓存
     -->
-    <select id="getById" resultMap="user_map" >
+    <select id="getById" resultMap="user_map" flushCache="false">
         select
         <include refid="${user_table}">
             <property name="alias" value="t1"/>
         </include>
-        from ct_user t1 where id = #{id}
+        from ct_user t1
+        where id = ${id}
+
     </select>
 
 

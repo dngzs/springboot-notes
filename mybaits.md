@@ -4592,7 +4592,7 @@ private Object wrapCollection(final Object object) {
 
 总结：至此，mybatis select和select就说完了，在这个步骤中，DefaultSqlSession包装了下集合类型的参数，并且将逻辑分页组件RowBounds和空的ResultHandler传入executor中，委托Executor做了底层的查询
 
-### 4  Executor的执行过程
+### 4.7  Executor的执行过程
 
 Executor上面我们已经说到，存在三种类型的Executor，如果存在缓存，还存在第四种类型的，来看下继承结构
 
@@ -4636,7 +4636,7 @@ public Executor newExecutor(Transaction transaction, ExecutorType executorType) 
 
 ​       在来看看非缓存装饰器模式，分为三种SimpleExecutor，BatchExecutor，ReuseExecutor，这三个缓存执行器有一个共同点，那都是继承自BaseExecutor，不同点那就是他们各有各的特点，BatchExecutor用在批量数据执行上优点一绝，而ReuseExecutor是SimpleExecutor的一种提升，如果要用在生产上呢，个人推荐ReuseExecutor，如果要做批量操作，推荐BatchExecutor
 
-​       我们刚说到这三种类型的执行器都基于基础执行器BaseExecutor，基础执行器完成了大部分的公共功能，如下所示：
+​       我们刚说到这三种类型的执行器都基于基础执行器BaseExecutor，基础执行器完成了大部分的公共功能，如下所示，这里我们不一一分析代码了，没实际的意义，当执行到这里的代码的时候再一一看看
 
 ```java
 public abstract class BaseExecutor implements Executor {
@@ -4666,7 +4666,12 @@ public abstract class BaseExecutor implements Executor {
     this.configuration = configuration;
     this.wrapper = this;
   }
-
+  
+  /**
+   *
+   * 获取事务管理器
+   *
+   **/
   @Override
   public Transaction getTransaction() {
     if (closed) {
@@ -4675,6 +4680,11 @@ public abstract class BaseExecutor implements Executor {
     return transaction;
   }
 
+  /**
+   *
+   * 关闭本执行器的transaction
+   *
+   **/
   @Override
   public void close(boolean forceRollback) {
     try {
@@ -4697,11 +4707,17 @@ public abstract class BaseExecutor implements Executor {
     }
   }
 
+  
   @Override
   public boolean isClosed() {
     return closed;
   }
 
+  /**
+   *
+   *  更新操作
+   *
+   */
   @Override
   public int update(MappedStatement ms, Object parameter) throws SQLException {
     ErrorContext.instance().resource(ms.getResource()).activity("executing an update").object(ms.getId());
@@ -4712,17 +4728,7 @@ public abstract class BaseExecutor implements Executor {
     return doUpdate(ms, parameter);
   }
 
-  @Override
-  public List<BatchResult> flushStatements() throws SQLException {
-    return flushStatements(false);
-  }
 
-  public List<BatchResult> flushStatements(boolean isRollBack) throws SQLException {
-    if (closed) {
-      throw new ExecutorException("Executor was closed.");
-    }
-    return doFlushStatements(isRollBack);
-  }
 
   @Override
   public <E> List<E> query(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler) throws SQLException {
@@ -4767,24 +4773,7 @@ public abstract class BaseExecutor implements Executor {
     return list;
   }
 
-  @Override
-  public <E> Cursor<E> queryCursor(MappedStatement ms, Object parameter, RowBounds rowBounds) throws SQLException {
-    BoundSql boundSql = ms.getBoundSql(parameter);
-    return doQueryCursor(ms, parameter, rowBounds, boundSql);
-  }
-
-  @Override
-  public void deferLoad(MappedStatement ms, MetaObject resultObject, String property, CacheKey key, Class<?> targetType) {
-    if (closed) {
-      throw new ExecutorException("Executor was closed.");
-    }
-    DeferredLoad deferredLoad = new DeferredLoad(resultObject, property, key, localCache, configuration, targetType);
-    if (deferredLoad.canLoad()) {
-      deferredLoad.load();
-    } else {
-      deferredLoads.add(new DeferredLoad(resultObject, property, key, localCache, configuration, targetType));
-    }
-  }
+ 
 
   @Override
   public CacheKey createCacheKey(MappedStatement ms, Object parameterObject, RowBounds rowBounds, BoundSql boundSql) {
@@ -4828,92 +4817,6 @@ public abstract class BaseExecutor implements Executor {
     return localCache.getObject(key) != null;
   }
 
-  @Override
-  public void commit(boolean required) throws SQLException {
-    if (closed) {
-      throw new ExecutorException("Cannot commit, transaction is already closed");
-    }
-    clearLocalCache();
-    flushStatements();
-    if (required) {
-      transaction.commit();
-    }
-  }
-
-  @Override
-  public void rollback(boolean required) throws SQLException {
-    if (!closed) {
-      try {
-        clearLocalCache();
-        flushStatements(true);
-      } finally {
-        if (required) {
-          transaction.rollback();
-        }
-      }
-    }
-  }
-
-  @Override
-  public void clearLocalCache() {
-    if (!closed) {
-      localCache.clear();
-      localOutputParameterCache.clear();
-    }
-  }
-
-  protected abstract int doUpdate(MappedStatement ms, Object parameter)
-      throws SQLException;
-
-  protected abstract List<BatchResult> doFlushStatements(boolean isRollback)
-      throws SQLException;
-
-  protected abstract <E> List<E> doQuery(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql)
-      throws SQLException;
-
-  protected abstract <E> Cursor<E> doQueryCursor(MappedStatement ms, Object parameter, RowBounds rowBounds, BoundSql boundSql)
-      throws SQLException;
-
-  protected void closeStatement(Statement statement) {
-    if (statement != null) {
-      try {
-        if (!statement.isClosed()) {
-          statement.close();
-        }
-      } catch (SQLException e) {
-        // ignore
-      }
-    }
-  }
-
-  /**
-   * Apply a transaction timeout.
-   * @param statement a current statement
-   * @throws SQLException if a database access error occurs, this method is called on a closed <code>Statement</code>
-   * @since 3.4.0
-   * @see StatementUtil#applyTransactionTimeout(Statement, Integer, Integer)
-   */
-  protected void applyTransactionTimeout(Statement statement) throws SQLException {
-    StatementUtil.applyTransactionTimeout(statement, statement.getQueryTimeout(), transaction.getTimeout());
-  }
-
-  private void handleLocallyCachedOutputParameters(MappedStatement ms, CacheKey key, Object parameter, BoundSql boundSql) {
-    if (ms.getStatementType() == StatementType.CALLABLE) {
-      final Object cachedParameter = localOutputParameterCache.getObject(key);
-      if (cachedParameter != null && parameter != null) {
-        final MetaObject metaCachedParameter = configuration.newMetaObject(cachedParameter);
-        final MetaObject metaParameter = configuration.newMetaObject(parameter);
-        for (ParameterMapping parameterMapping : boundSql.getParameterMappings()) {
-          if (parameterMapping.getMode() != ParameterMode.IN) {
-            final String parameterName = parameterMapping.getProperty();
-            final Object cachedValue = metaCachedParameter.getValue(parameterName);
-            metaParameter.setValue(parameterName, cachedValue);
-          }
-        }
-      }
-    }
-  }
-
   private <E> List<E> queryFromDatabase(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) throws SQLException {
     List<E> list;
     localCache.putObject(key, EXECUTION_PLACEHOLDER);
@@ -4938,206 +4841,380 @@ public abstract class BaseExecutor implements Executor {
     }
   }
 
-  @Override
-  public void setExecutorWrapper(Executor wrapper) {
-    this.wrapper = wrapper;
-  }
-  
-  private static class DeferredLoad {
-
-    private final MetaObject resultObject;
-    private final String property;
-    private final Class<?> targetType;
-    private final CacheKey key;
-    private final PerpetualCache localCache;
-    private final ObjectFactory objectFactory;
-    private final ResultExtractor resultExtractor;
-
-    // issue #781
-    public DeferredLoad(MetaObject resultObject,
-                        String property,
-                        CacheKey key,
-                        PerpetualCache localCache,
-                        Configuration configuration,
-                        Class<?> targetType) {
-      this.resultObject = resultObject;
-      this.property = property;
-      this.key = key;
-      this.localCache = localCache;
-      this.objectFactory = configuration.getObjectFactory();
-      this.resultExtractor = new ResultExtractor(configuration, objectFactory);
-      this.targetType = targetType;
-    }
-
-    public boolean canLoad() {
-      return localCache.getObject(key) != null && localCache.getObject(key) != EXECUTION_PLACEHOLDER;
-    }
-
-    public void load() {
-      @SuppressWarnings( "unchecked" )
-      // we suppose we get back a List
-      List<Object> list = (List<Object>) localCache.getObject(key);
-      Object value = resultExtractor.extractObjectFromList(list, targetType);
-      resultObject.setValue(property, value);
-    }
-
-  }
+  //.....省略一大部分代码
 
 }
 ```
 
+从上述代码中我们可以看到，BaseExcutor实现了大部分一级缓存，事务提交、回滚、超时设置，延迟加载相关的功能，但是在该基类中，留下了四个方法供应子类去扩展
 
+```java
+protected abstract int doUpdate(MappedStatement ms, Object parameter)
+    throws SQLException;
 
+protected abstract List<BatchResult> doFlushStatements(boolean isRollback)
+    throws SQLException;
 
+protected abstract <E> List<E> doQuery(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql)
+    throws SQLException;
 
-#### 4.1  简单执行器SimpleExecutor的实现
+protected abstract <E> Cursor<E> doQueryCursor(MappedStatement ms, Object parameter, RowBounds rowBounds, BoundSql boundSql)
+    throws SQLException;
+```
 
+这里就不具体看了，等到代码调试的时候，在一一看吧
 
+------
 
-简单
+好了，概念就说到这里吧，我们接着4.6的selectList代码分析来说吧。
 
-#### 4.2 缓存执行器CachingExecutor的实现
+```java
+@Override
+public <E> List<E> selectList(String statement, Object parameter, RowBounds rowBounds) {
+  try {
+    //在这里我们就拿到在mapper初始化加载的时候加载MappedStatement对象了
+    MappedStatement ms = configuration.getMappedStatement(statement);
+    //调用了executor的query方法来执行，此处方法调用，默认加了一个空的ResultHandler
+    return executor.query(ms, wrapCollection(parameter), rowBounds, Executor.NO_RESULT_HANDLER);
+  } catch (Exception e) {
+    throw ExceptionFactory.wrapException("Error querying database.  Cause: " + e, e);
+  } finally {
+    ErrorContext.instance().reset();
+  }
+}
+```
 
-在上述代码分析中，我们看到
+这里executor，如果存在二级缓存的话，那么就是CachingExecutor
 
 ```java
 public class CachingExecutor implements Executor {
-
+  //真正的代理Executor
   private final Executor delegate;
+  //事务化缓存管理器
   private final TransactionalCacheManager tcm = new TransactionalCacheManager();
-
-  public CachingExecutor(Executor delegate) {
-    this.delegate = delegate;
-    delegate.setExecutorWrapper(this);
-  }
-
-  @Override
-  public Transaction getTransaction() {
-    return delegate.getTransaction();
-  }
-
-  @Override
-  public void close(boolean forceRollback) {
-    try {
-      //issues #499, #524 and #573
-      if (forceRollback) { 
-        tcm.rollback();
-      } else {
-        tcm.commit();
-      }
-    } finally {
-      delegate.close(forceRollback);
-    }
-  }
-
-  @Override
-  public boolean isClosed() {
-    return delegate.isClosed();
-  }
-
-  @Override
-  public int update(MappedStatement ms, Object parameterObject) throws SQLException {
-    flushCacheIfRequired(ms);
-    return delegate.update(ms, parameterObject);
-  }
-
-  @Override
-  public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler) throws SQLException {
-    BoundSql boundSql = ms.getBoundSql(parameterObject);
-    CacheKey key = createCacheKey(ms, parameterObject, rowBounds, boundSql);
-    return query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
-  }
-
-  @Override
-  public <E> Cursor<E> queryCursor(MappedStatement ms, Object parameter, RowBounds rowBounds) throws SQLException {
-    flushCacheIfRequired(ms);
-    return delegate.queryCursor(ms, parameter, rowBounds);
-  }
-
-  @Override
-  public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql)
-      throws SQLException {
-    Cache cache = ms.getCache();
-    if (cache != null) {
-      flushCacheIfRequired(ms);
-      if (ms.isUseCache() && resultHandler == null) {
-        ensureNoOutParams(ms, boundSql);
-        @SuppressWarnings("unchecked")
-        List<E> list = (List<E>) tcm.getObject(cache, key);
-        if (list == null) {
-          list = delegate.<E> query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
-          tcm.putObject(cache, key, list); // issue #578 and #116
-        }
-        return list;
-      }
-    }
-    return delegate.<E> query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
-  }
-
-  @Override
-  public List<BatchResult> flushStatements() throws SQLException {
-    return delegate.flushStatements();
-  }
-
-  @Override
-  public void commit(boolean required) throws SQLException {
-    delegate.commit(required);
-    tcm.commit();
-  }
-
-  @Override
-  public void rollback(boolean required) throws SQLException {
-    try {
-      delegate.rollback(required);
-    } finally {
-      if (required) {
-        tcm.rollback();
-      }
-    }
-  }
-
-  private void ensureNoOutParams(MappedStatement ms, BoundSql boundSql) {
-    if (ms.getStatementType() == StatementType.CALLABLE) {
-      for (ParameterMapping parameterMapping : boundSql.getParameterMappings()) {
-        if (parameterMapping.getMode() != ParameterMode.IN) {
-          throw new ExecutorException("Caching stored procedures with OUT params is not supported.  Please configure useCache=false in " + ms.getId() + " statement.");
-        }
-      }
-    }
-  }
-
-  @Override
-  public CacheKey createCacheKey(MappedStatement ms, Object parameterObject, RowBounds rowBounds, BoundSql boundSql) {
-    return delegate.createCacheKey(ms, parameterObject, rowBounds, boundSql);
-  }
-
-  @Override
-  public boolean isCached(MappedStatement ms, CacheKey key) {
-    return delegate.isCached(ms, key);
-  }
-
-  @Override
-  public void deferLoad(MappedStatement ms, MetaObject resultObject, String property, CacheKey key, Class<?> targetType) {
-    delegate.deferLoad(ms, resultObject, property, key, targetType);
-  }
-
-  @Override
-  public void clearLocalCache() {
-    delegate.clearLocalCache();
-  }
-
-  private void flushCacheIfRequired(MappedStatement ms) {
-    Cache cache = ms.getCache();
-    if (cache != null && ms.isFlushCacheRequired()) {      
-      tcm.clear(cache);
-    }
-  }
-
-  @Override
-  public void setExecutorWrapper(Executor executor) {
-    throw new UnsupportedOperationException("This method should not be called");
-  }
-
+    //....省略一大堆代码
+    
 }
 ```
+
+接着query方法
+
+```java
+@Override
+public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler) throws SQLException {
+  //获取BoundSql
+  BoundSql boundSql = ms.getBoundSql(parameterObject);
+  CacheKey key = createCacheKey(ms, parameterObject, rowBounds, boundSql);
+  return query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
+}
+```
+
+这里我们分三步来进行
+
+1. **获取BoundSql对象**
+
+MappedStatement#getBoundSql
+
+```java
+public BoundSql getBoundSql(Object parameterObject) {
+  //通过SqlSource来创建BoundSql
+  BoundSql boundSql = sqlSource.getBoundSql(parameterObject);
+  //获取参数映射
+  List<ParameterMapping> parameterMappings = boundSql.getParameterMappings();
+  //如果参数映射是空的，或者什么参数都没有，则重新构造一个新的BoundSql
+  if (parameterMappings == null || parameterMappings.isEmpty()) {
+    boundSql = new BoundSql(configuration, boundSql.getSql(), parameterMap.getParameterMappings(), parameterObject);
+  }
+
+  // 检查参数映射中的嵌套结果映射（在新版的mybaits中，parameterMap将被废弃，这里的内容我们也准备废弃掉，不准备详细说明）
+  for (ParameterMapping pm : boundSql.getParameterMappings()) {
+    String rmId = pm.getResultMapId();
+    if (rmId != null) {
+      ResultMap rm = configuration.getResultMap(rmId);
+      if (rm != null) {
+        hasNestedResultMaps |= rm.hasNestedResultMaps();
+      }
+    }
+  }
+
+  return boundSql;
+}
+```
+
+上面通过sqlSource获取BoundSql的过程，我们说过，sql分为动态sql和静态sql,那么获取BoundSql的过程就存在动态sql的解析过程
+
+ **我们先来分析下静态sql怎么获取BoundSql的**
+
+RawSqlSource#getBoundSql
+
+```java
+@Override
+public BoundSql getBoundSql(Object parameterObject) {
+  //调用StaticSqlSource的getBoundSql方法
+  return sqlSource.getBoundSql(parameterObject);
+}
+```
+
+StaticSqlSource#getBoundSql
+
+```java
+@Override
+public BoundSql getBoundSql(Object parameterObject) {
+  return new BoundSql(configuration, sql, parameterMappings, parameterObject);
+}
+```
+
+StaticSqlSource则是 直接创建了一个BoundSql，因为在静态sql中，sql、参数映射是在Mapper文件加载的时候就已经解析好的
+
+**在来分析动态sql怎么获取BoundSql的**
+
+动态sql是每次执行Mapper增删改查的时候才会去解析sql语句的
+
+DynamicSqlSource#getBoundSql
+
+```java
+@Override
+public BoundSql getBoundSql(Object parameterObject) {
+  //创建DynamicContext对象，我们之前分析过，唯一区别的是，会传入参数值
+  DynamicContext context = new DynamicContext(configuration, parameterObject);
+  //调用SqlNode来获取sql语句
+  rootSqlNode.apply(context);
+  //和静态sql的创建一样，创建SqlSourceBuilder
+  SqlSourceBuilder sqlSourceParser = new SqlSourceBuilder(configuration);
+  //获取参数类型
+  Class<?> parameterType = parameterObject == null ? Object.class : parameterObject.getClass();
+  //获取sqlSource,此处，会获取到即将要预编译的sql(#{}替换为？,和静态sql一样)，最终，也是创建了一个StaticSqlSource
+  SqlSource sqlSource = sqlSourceParser.parse(context.getSql(), parameterType, context.getBindings());
+  //通过StaticSqlSource的getBoundSql创建一个新的BoundSql
+  BoundSql boundSql = sqlSource.getBoundSql(parameterObject);
+  //通过context还添加了两个追加的属性
+  for (Map.Entry<String, Object> entry : context.getBindings().entrySet()) {
+    boundSql.setAdditionalParameter(entry.getKey(), entry.getValue());
+  }
+  return boundSql;
+}
+```
+
+在此最后，还添加了两个追加属性（DynamicContext中的）
+
+```java
+public static final String PARAMETER_OBJECT_KEY = "_parameter";
+public static final String DATABASE_ID_KEY = "_databaseId";
+```
+
+> 面试题来了,可以看到，mybatis的静态sql和动态sql看起来好像没啥区别，为啥一个是在mapper文件加载的时候就确定了，为啥一个要等到mapper方法执行的时候才加载呢？哈哈，看到上面的源码分析过程，你知道了吗？
+
+2. **生成CacheKey**
+
+对于cacheKey的生成，缓存的createCacheKey，这是直接调用了代理的createCacheKey方法，而对于所有的代理Executor对象，createCacheKey则都是由BaseExecutor来实现的
+
+CachingExecutor#createCacheKey
+
+```java
+@Override
+public CacheKey createCacheKey(MappedStatement ms, Object parameterObject, RowBounds rowBounds, BoundSql boundSql) {
+  return delegate.createCacheKey(ms, parameterObject, rowBounds, boundSql);
+}
+```
+
+BaseExecutor#createCacheKey
+
+```java
+@Override
+public CacheKey createCacheKey(MappedStatement ms, Object parameterObject, RowBounds rowBounds, BoundSql boundSql) {
+  //如果Executor已被关闭，这直接报错
+  if (closed) {
+    throw new ExecutorException("Executor was closed.");
+  }
+  CacheKey cacheKey = new CacheKey();
+  //传入的 statementId （例：com.best.dao.UserMapper.findById）
+  cacheKey.update(ms.getId());
+  //逻辑分页的结果集范围
+  cacheKey.update(rowBounds.getOffset());
+  cacheKey.update(rowBounds.getLimit());
+  //具体执行的Sql
+  cacheKey.update(boundSql.getSql());
+  List<ParameterMapping> parameterMappings = boundSql.getParameterMappings();
+  TypeHandlerRegistry typeHandlerRegistry = ms.getConfiguration().getTypeHandlerRegistry();
+  //入参变量值 
+  for (ParameterMapping parameterMapping : parameterMappings) {
+    if (parameterMapping.getMode() != ParameterMode.OUT) {
+      Object value;
+      String propertyName = parameterMapping.getProperty();
+      if (boundSql.hasAdditionalParameter(propertyName)) {
+        value = boundSql.getAdditionalParameter(propertyName);
+      } else if (parameterObject == null) {
+        value = null;
+      } else if (typeHandlerRegistry.hasTypeHandler(parameterObject.getClass())) {
+        value = parameterObject;
+      } else {
+        MetaObject metaObject = configuration.newMetaObject(parameterObject);
+        value = metaObject.getValue(propertyName);
+      }
+      cacheKey.update(value);
+    }
+  }
+  //此处修复了一个bug,当存在不同的环境时，也可能存在缓存key不更新的问题，该代码是在mybaits3.3.0中修复的
+  if (configuration.getEnvironment() != null) {
+    // issue #176
+    cacheKey.update(configuration.getEnvironment().getId());
+  }
+  return cacheKey;
+}
+```
+
+至于CacheKey的实现：CacheKey通过hashcode，checksum，count，updateList四个属性，重写equals和hashcode方法，既保证从hashmap根据key取value的效率，也保证取的结果的正确性。
+
+```java
+public class CacheKey implements Cloneable, Serializable {
+
+  public static final CacheKey NULL_CACHE_KEY = new NullCacheKey();
+  //默认扩展因子
+  private static final int DEFAULT_MULTIPLYER = 37;
+  // 默认HashCdoe基值,至于为什么是17，是为了更容易防止hash冲突
+  private static final int DEFAULT_HASHCODE = 17;
+
+  private final int multiplier;
+  private int hashcode;
+  private long checksum;
+  private int count;
+  // 这个属性最重要了
+  private List<Object> updateList;
+
+  public CacheKey() {
+    this.hashcode = DEFAULT_HASHCODE;
+    this.multiplier = DEFAULT_MULTIPLYER;
+    this.count = 0;
+    this.updateList = new ArrayList<Object>();
+  }
+
+  public CacheKey(Object[] objects) {
+    this();
+    updateAll(objects);
+  }
+
+  public int getUpdateCount() {
+    return updateList.size();
+  }
+
+  public void update(Object object) {
+    //获取传入值得hashCode
+    int baseHashCode = object == null ? 1 : ArrayUtil.hashCode(object); 
+    
+    //参与生成key的参数个数
+    count++;
+    //校验和
+    checksum += baseHashCode;
+    baseHashCode *= count;
+    //生成hashcode（扩展因子*当前的哈希值 + 对象的哈希值*扩大倍数）
+    hashcode = multiplier * hashcode + baseHashCode;
+    // 添加到对比条件中
+    updateList.add(object);
+  }
+
+  public void updateAll(Object[] objects) {
+    for (Object o : objects) {
+      update(o);
+    }
+  }
+//CacheKey通过hashcode，checksum，count，updateList四个属性，重写equals和hashcode方法，既保证从hashmap根据key取value的效率，也保证取的结果的正确性。
+  @Override
+  public boolean equals(Object object) {
+    if (this == object) {
+      return true;
+    }
+    if (!(object instanceof CacheKey)) {
+      return false;
+    }
+
+    final CacheKey cacheKey = (CacheKey) object;
+    //先看hashcode是不是相同
+    if (hashcode != cacheKey.hashcode) {
+      return false;
+    }
+    //再看check是不是相同
+    if (checksum != cacheKey.checksum) {
+      return false;
+    }
+    //再看参数个数是不是相同
+    if (count != cacheKey.count) {
+      return false;
+    }
+    //如果都相同，则获取对比条件列表进行各个值equals比对
+    for (int i = 0; i < updateList.size(); i++) {
+      Object thisObject = updateList.get(i);
+      Object thatObject = cacheKey.updateList.get(i);
+      if (!ArrayUtil.equals(thisObject, thatObject)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @Override
+  public int hashCode() {
+    return hashcode;
+  }
+  //...省略无关紧要的方法
+}
+```
+
+3. 方法查询（缓存或者db查询）
+
+CachingExecutor#query
+
+```java
+@Override
+public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql)
+    throws SQLException {
+  //通过MappedStatement拿到二级缓存
+  Cache cache = ms.getCache();
+  //首先判断是否启用了二级缓存
+  if (cache != null) {
+    //如果需要，是不是要刷新二级缓存
+    flushCacheIfRequired(ms);
+    //对于查询而言useCache是true,而增删改useCache是false的
+    if (ms.isUseCache() && resultHandler == null) {
+      //确保没有参数
+      ensureNoOutParams(ms, boundSql);
+      @SuppressWarnings("unchecked")
+      List<E> list = (List<E>) tcm.getObject(cache, key);
+      if (list == null) {
+        list = delegate.<E> query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
+        tcm.putObject(cache, key, list); // issue #578 and #116
+      }
+      return list;
+    }
+  }
+  return delegate.<E> query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
+}
+```
+
+```java
+private void flushCacheIfRequired(MappedStatement ms) {
+  Cache cache = ms.getCache();
+  //对于查询而言flushCache属性默认是false，而增删改操作的flushCache 属性默认为true。
+  if (cache != null && ms.isFlushCacheRequired()) {      
+    tcm.clear(cache);
+  }
+}
+```
+
+```java
+//确保没有参数
+private void ensureNoOutParams(MappedStatement ms, BoundSql boundSql) {
+    //判断是不是存储过程调用
+    if (ms.getStatementType() == StatementType.CALLABLE) {
+    //如果是村吃过程调用，如果
+    for (ParameterMapping parameterMapping : boundSql.getParameterMappings()) {
+      //不支持出参
+      if (parameterMapping.getMode() != ParameterMode.IN) {
+        throw new ExecutorException("Caching stored procedures with OUT params is not supported.  Please configure useCache=false in " + ms.getId() + " statement.");
+      }
+    }
+  }
+}
+```
+
+
 
