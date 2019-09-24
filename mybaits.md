@@ -4886,6 +4886,8 @@ public <E> List<E> selectList(String statement, Object parameter, RowBounds rowB
 
 这里executor，如果存在二级缓存的话，那么就是CachingExecutor
 
+#### 4.7.1  CachingExecutor执行过程
+
 ```java
 public class CachingExecutor implements Executor {
   //真正的代理Executor
@@ -5216,5 +5218,365 @@ private void ensureNoOutParams(MappedStatement ms, BoundSql boundSql) {
 }
 ```
 
+在上述的代码中tcm.getObject(cache, key)，从缓存tcm中拿取是否存在二级缓存，如果存在就直接返回，如果不存在缓存，则直接去数据库查，接下来我们就来看下这个tcm，tcm（TransactionalCacheManager）是mybaits对于二级缓存的实现
+
+**TransactionalCache& TransactionalCacheManager**
+
+```java
+public class TransactionalCacheManager {
+
+  private final Map<Cache, TransactionalCache> transactionalCaches = new HashMap<Cache, TransactionalCache>();
+
+  public void clear(Cache cache) {
+    getTransactionalCache(cache).clear();
+  }
+
+  public Object getObject(Cache cache, CacheKey key) {
+    return getTransactionalCache(cache).getObject(key);
+  }
+  
+  public void putObject(Cache cache, CacheKey key, Object value) {
+    getTransactionalCache(cache).putObject(key, value);
+  }
+  
+  //遍历transactional Caches 集合，井调用其中各个Transactional Cache 对象的相应方法。
+  public void commit() {
+    for (TransactionalCache txCache : transactionalCaches.values()) {
+      txCache.commit();
+    }
+  }
+  public void rollback() {
+    for (TransactionalCache txCache : transactionalCaches.values()) {
+      txCache.rollback();
+    }
+  }
+
+  private TransactionalCache getTransactionalCache(Cache cache) {
+    //找下指定的cache对应的TransactionalCache
+    TransactionalCache txCache = transactionalCaches.get(cache);
+    if (txCache == null) {
+      //如果找不到就创建
+      txCache = new TransactionalCache(cache);
+      //然后添加到transactionalCaches中去
+      transactionalCaches.put(cache, txCache);
+    }
+    //并返回
+    return txCache;
+  }
+
+}
+```
 
 
+
+```java
+public class TransactionalCache implements Cache {
+
+  private static final Log log = LogFactory.getLog(TransactionalCache.class);
+  //底层封装的二级缓存所对应的Cache 对象
+  private final Cache delegate;
+  //当该字段为true 时，则表示当前TransactionalCache 不可查询， 且提交事务时会将底层Cache 清空
+  private boolean clearOnCommit;
+  //暂时记录添加到TransactionalCache 中的数据。在事务提交时，会将其中的数据添加到二级後存中
+  private final Map<Object, Object> entriesToAddOnCommit;
+  //记录缓存未命中的CacheKey对象
+  private final Set<Object> entriesMissedInCache;
+
+  public TransactionalCache(Cache delegate) {
+    this.delegate = delegate;
+    this.clearOnCommit = false;
+    this.entriesToAddOnCommit = new HashMap<Object, Object>();
+    this.entriesMissedInCache = new HashSet<Object>();
+  }
+
+  @Override
+  public String getId() {
+    return delegate.getId();
+  }
+
+  @Override
+  public int getSize() {
+    return delegate.getSize();
+  }
+
+  @Override
+  public Object getObject(Object key) {
+    //查询底层的Cache 是否包含指定的key
+    Object object = delegate.getObject(key);
+    if (object == null) {
+      //如果底层缓存对象中不包含该缓存项，则将该key记录到entriesMissedInCache集合中（表示未命中）
+      entriesMissedInCache.add(key);
+    }
+    // issue #146
+    //如采clearOnCommit 为true ，则当前TransactionalCache 不可查询，始终返回null
+    if (clearOnCommit) {
+      return null;
+    } else {
+      //返回从底层Cache 中查询到的对象
+      return object;
+    }
+  }
+
+  @Override
+  public ReadWriteLock getReadWriteLock() {
+    return null;
+  }
+
+  @Override
+  public void putObject(Object key, Object object) {
+    entriesToAddOnCommit.put(key, object);
+  }
+
+  @Override
+  public Object removeObject(Object key) {
+    return null;
+  }
+
+  @Override
+  public void clear() {
+    //将clearOnCommit设置为true,并且清空事务未提交的暂存记录
+    clearOnCommit = true;
+    entriesToAddOnCommit.clear();
+  }
+
+  public void commit() {
+    //在事务提交前， 清空二级缓存
+    if (clearOnCommit) {
+      delegate.clear();
+    }
+    flushPendingEntries();
+    reset();
+  }
+  //将缓存提交前的暂存记录更新到二级缓存中
+  private void flushPendingEntries() {
+    //遍历entriesToAddOnCommit 集合，将其中记录的缓存暂存添加到二级缓存中
+    for (Map.Entry<Object, Object> entry : entriesToAddOnCommit.entrySet()) {
+      delegate.putObject(entry.getKey(), entry.getValue());
+    }
+    //遍历entriesMissedinCache未命中集合，将entriesToAddOnCommit 集合中不包含的缓存项添加到二级缓存中去
+    for (Object entry : entriesMissedInCache) {
+      if (!entriesToAddOnCommit.containsKey(entry)) {
+        delegate.putObject(entry, null);
+      }
+    }
+  }
+
+  //将entriesMissedinCache集合中记录的缓存项从二级缓存中删除
+  public void rollback() {
+    unlockMissedEntries();
+    reset();
+  }
+    
+  private void unlockMissedEntries() {
+    for (Object entry : entriesMissedInCache) {
+      try {
+        delegate.removeObject(entry);
+      } catch (Exception e) {
+        log.warn("Unexpected exception while notifiying a rollback to the cache adapter."
+            + "Consider upgrading your cache adapter to the latest version.  Cause: " + e);
+      }
+    }
+  }
+
+  //重置clearOnCommit 为false ，并清空entriesToAddOnCommit、entriesMissedinCache集合
+  private void reset() {
+    clearOnCommit = false;
+    entriesToAddOnCommit.clear();
+    entriesMissedInCache.clear();
+  }
+  
+
+}
+
+```
+
+介绍完了缓存的实现之后，我们继续回到CachingExecutor的实现，上面已经讲完了CachingExecutor的query方法的实现，来统一总结下
+
+> 1、获取BoundSql 对象，创建查询语句对应的CacheKey 对象
+>
+> 2、）检测是否开启了二级缓存，如果没有开启二级缓存，则直接调用底层Executor 对象的
+> query（）方法查询数据库。如果开启了二级缓存，则继续后面的步骤。
+>
+> 3、检测查询操作是否包含输出类型的参数，如果是这种情况，则报错。
+>
+> 4、调用TransactionalCacheManager.getObject （）方法查询二级缓存，如果二级缓存中查找
+> 到相应的结果对象，则直接将该结果对象返回。
+
+#### 4.7.2 真实的代理Executor执行
+
+cacheExecutor如果无缓存或者缓存不存在，则执行真实的代理query方法，我们来到BaseExecutor的query方法
+
+BaseExecutor#query
+
+```java
+public <E> List<E> query(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) throws SQLException {
+    ErrorContext.instance().resource(ms.getResource()).activity("executing a query").object(ms.getId());
+    if (closed) {
+      throw new ExecutorException("Executor was closed.");
+    }
+    //如果查询栈是0，也就是第一次进来，并且FlushCache是true(查询默认flushCache是false,而增删改是true)
+    if (queryStack == 0 && ms.isFlushCacheRequired()) {
+      //非嵌套查询，并且＜select＞节点配置的flushCache 属性为true 时，才会清空一级缓存;flushCache配置项是影响一级缓存中结果对象存活时长的第一个方面
+      //清空一级缓存
+      clearLocalCache();
+    }
+    List<E> list;
+    try {
+      //增加查询栈
+      queryStack++;
+      //查询一级缓存
+      list = resultHandler == null ? (List<E>) localCache.getObject(key) : null;
+      if (list != null) {
+        handleLocallyCachedOutputParameters(ms, key, parameter, boundSql);
+      } else {
+        //从数据库获取
+        list = queryFromDatabase(ms, parameter, rowBounds, resultHandler, key, boundSql);
+      }
+    } finally {
+      //查询完后，queryStack--
+      queryStack--;
+    }
+    if (queryStack == 0) {
+      //延迟加载的相关内容
+      for (DeferredLoad deferredLoad : deferredLoads) {
+        deferredLoad.load();
+      }
+      // issue #601
+      deferredLoads.clear();
+      //如果localCacheScope是STATEMENT，则清理掉本地缓存
+      if (configuration.getLocalCacheScope() == LocalCacheScope.STATEMENT) {
+        // issue #482
+        clearLocalCache();
+      }
+    }
+    return list;
+  }
+
+
+@Override
+public void clearLocalCache() {
+    //如果没有关闭Executor
+   if (!closed) {
+     //清空本地缓存
+     localCache.clear();
+     localOutputParameterCache.clear();
+   }
+}
+
+private void handleLocallyCachedOutputParameters(MappedStatement ms, CacheKey key, Object parameter, BoundSql boundSql) {
+    //如果是存储过程调用
+    if (ms.getStatementType() == StatementType.CALLABLE) {
+      //获取缓存中保存的输出类型参数
+      final Object cachedParameter = localOutputParameterCache.getObject(key);
+      //如果获取到的参数不是空
+      if (cachedParameter != null && parameter != null) {
+        final MetaObject metaCachedParameter = configuration.newMetaObject(cachedParameter);
+        final MetaObject metaParameter = configuration.newMetaObject(parameter);
+        for (ParameterMapping parameterMapping : boundSql.getParameterMappings()) {
+          //判断是不是输入类型的参数
+          if (parameterMapping.getMode() != ParameterMode.IN) {
+            //设置到用户传入的实参（ parameter ）对象中
+            final String parameterName = parameterMapping.getProperty();
+            final Object cachedValue = metaCachedParameter.getValue(parameterName);
+            metaParameter.setValue(parameterName, cachedValue);
+          }
+        }
+      }
+    }
+  }
+```
+
+我们接着查询数据库相关的操作
+
+```java
+list = queryFromDatabase(ms, parameter, rowBounds, resultHandler, key, boundSql);
+```
+
+BaseExecutor#queryFromDatabase
+
+```java
+private <E> List<E> queryFromDatabase(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) throws SQLException {
+  List<E> list;
+  //放入一级缓存
+  localCache.putObject(key, EXECUTION_PLACEHOLDER);
+  try {
+    //开始真正的查询
+    list = doQuery(ms, parameter, rowBounds, resultHandler, boundSql);
+  } finally {
+    //查询完移除掉一级缓存
+    localCache.removeObject(key);
+  }
+  //查询完后，更新缓存
+  localCache.putObject(key, list);
+  //如果是存储过程，则还要将入参更新加入到缓存中去
+  if (ms.getStatementType() == StatementType.CALLABLE) {
+    localOutputParameterCache.putObject(key, parameter);
+  }
+  return list;
+}
+
+public enum ExecutionPlaceholder {
+  EXECUTION_PLACEHOLDER
+}
+```
+
+我们继续跟进
+
+##### 4.7.2.1 SimpleExecutor#doQuery
+
+```java
+@Override
+public <E> List<E> doQuery(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) throws SQLException {
+  Statement stmt = null;
+  try {
+    Configuration configuration = ms.getConfiguration();
+    //创建StatementHandler（至此，mybaits又一比较重要的对象产生了）
+    StatementHandler handler = configuration.newStatementHandler(wrapper, ms, parameter, rowBounds, resultHandler, boundSql);
+    //获取连接，准备参数
+    stmt = prepareStatement(handler, ms.getStatementLog());
+    //执行jdbc
+    return handler.<E>query(stmt, resultHandler);
+  } finally {
+    //关闭Statement
+    closeStatement(stmt);
+  }
+}
+```
+
+
+
+##### 4.7.2.2 ReuseExecutor#doQuery
+
+```java
+@Override
+public <E> List<E> doQuery(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) throws SQLException {
+  Configuration configuration = ms.getConfiguration();
+  ////创建StatementHandler
+  StatementHandler handler = configuration.newStatementHandler(wrapper, ms, parameter, rowBounds, resultHandler, boundSql);
+ //获取连接，准备参数
+  Statement stmt = prepareStatement(handler, ms.getStatementLog());
+  //关闭Statement
+  return handler.<E>query(stmt, resultHandler);
+}
+```
+
+##### 4.7.2.3 BatchExecutor#doQuery
+
+```java
+@Override
+public <E> List<E> doQuery(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql)
+    throws SQLException {
+  Statement stmt = null;
+  try {
+    flushStatements();
+    Configuration configuration = ms.getConfiguration();
+    StatementHandler handler = configuration.newStatementHandler(wrapper, ms, parameterObject, rowBounds, resultHandler, boundSql);
+    Connection connection = getConnection(ms.getStatementLog());
+    stmt = handler.prepare(connection, transaction.getTimeout());
+    handler.parameterize(stmt);
+    return handler.<E>query(stmt, resultHandler);
+  } finally {
+    closeStatement(stmt);
+  }
+}
+```
