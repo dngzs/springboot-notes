@@ -1,6 +1,7 @@
 package com.best;
 
 
+import com.best.scope.Scope2;
 import com.best.service.UserService;
 import com.best.tranction.ServiceB;
 import com.best.tranction.ServiceC;
@@ -25,9 +26,11 @@ public class App
         System.out.println(bean2);*/
 
         /*-------------------------------*/
-
-        ServiceC bean3 = applicationContext.getBean(ServiceC.class);
-        bean3.dosomethingC();
+        Scope2 bean = applicationContext.getBean(Scope2.class);
+        bean.dosome();
+        bean.dosome();
+        //ServiceC bean3 = applicationContext.getBean(ServiceC.class);
+        //bean3.dosomethingC();
         //com.best.service.A bean4 = applicationContext.getBean(com.best.service.A.class);
         //bean4.b();
     }

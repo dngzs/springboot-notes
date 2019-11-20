@@ -18,14 +18,13 @@ import com.ctrip.framework.apollo.model.ConfigChangeEvent;
 import com.ctrip.framework.apollo.spring.annotation.EnableApolloConfig;
 
 @Controller
-@EnableApolloConfig
 public class IndexController {
 
     private static final Logger logger = LoggerFactory.getLogger(IndexController.class);
 
     private Config config;
 
-    @Value("${timeout:200}")
+   /* @Value("${timeout:200}")
     private int timeout;
     @Value("${batch:200}")
     private int batch;
@@ -65,5 +64,5 @@ public class IndexController {
             }
         });
     }
-
+*/
 }

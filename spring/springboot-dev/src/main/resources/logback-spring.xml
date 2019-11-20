@@ -3,7 +3,7 @@
 
     <!--<include resource="org/springframework/boot/logging/logback/base.xml"/>-->
     <!-- 定义log文件的目录 不建议使用相对路径-->
-    <springProperty scope="context" name="root" source="logger.root" defaultValue="/logs/ecosphere"/>
+    <springProperty scope="context" name="root" source="logger.root" defaultValue="${logging.root}"/>
     <springProperty scope="context" name="serviceList" source="logger.serviceList" defaultValue="localhost"/>
     <springProperty scope="context" name="appName" source="logger.appName" defaultValue="appname"/>
 

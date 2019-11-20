@@ -12,6 +12,11 @@ public class ServiceBImpl implements ServiceB {
 
     @Transactional
     public void dosomethingB() {
-        serviceA.dosomethingA();
+        try{
+            serviceA.dosomethingA();
+
+        }catch(Exception e){
+            System.err.println("错误了");
+        }
     }
 }

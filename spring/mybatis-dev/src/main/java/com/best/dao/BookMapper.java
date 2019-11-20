@@ -1,10 +1,11 @@
 package com.best.dao;
 
 import com.best.po.Book;
+import com.best.po.User;
 import org.apache.ibatis.annotations.Param;
 
 public interface BookMapper {
-    Book getById(@Param("id") Long id);
+    Book getById(Book book );
 
-    Book getByIdAndName(@Param("id") Long id,@Param("userId")Long userId);
+    Book getByIdAndName(Long id,Long userId);
 }

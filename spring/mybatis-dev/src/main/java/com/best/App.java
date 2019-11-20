@@ -29,13 +29,15 @@ public class App {
         query.setId(1L);
         CtUser user = mapper.getWithAgeAndId(1l,0);
         System.out.println(user);*/
-        List ids = new ArrayList();
+        /*List ids = new ArrayList();
         ids.add(1L);
         ids.add(2L);
         CtUser byId = mapper.getById(1L);
-
+*/
         BookMapper bookMapper = sqlSession.getMapper(BookMapper.class);
-        Book book = bookMapper.getById(1L);
+        Book book1 = new Book();
+        book1.setId(1L);
+        Book book = bookMapper.getById(book1);
         System.out.println(book);
     }
 }

@@ -12,10 +12,10 @@
     </resultMap>
 
     <select id="getById" resultType="book" parameterType="Long">
-        select * from ct_book where id = #{id:NUMERIC}
+        select * from ct_book where id = #{id}
     </select>
 
     <select id="getByIdAndName" resultType="book" parameterType="map">
-        select * from ct_book where id = #{id} and user_Id = #{userId}
+        select * from ct_book where id = #{0} and user_Id = #{1}
     </select>
 </mapper>

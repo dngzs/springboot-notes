@@ -23,7 +23,7 @@ public class ConsumerListener2 implements ChannelAwareMessageListener{
         String s = (String) msgConverter.fromMessage(message);
         System.out.println("-------------------"+s);
         //Thread.sleep(100000l);
-        //throw  new RuntimeException("error");
+        throw  new RuntimeException("error");
 
     }
 }

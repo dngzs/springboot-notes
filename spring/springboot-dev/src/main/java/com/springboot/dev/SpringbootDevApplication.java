@@ -8,7 +8,6 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 
 @SpringBootApplication
-@EnableApolloConfig
 public class SpringbootDevApplication {
 
     public static void main(String[] args) {
