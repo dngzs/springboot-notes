@@ -16,6 +16,7 @@
         <module>spring-aop</module>
         <module>mybatis-dev</module>
         <module>spring-rabitmq</module>
+        <module>spring-shiro</module>
     </modules>
 
     <packaging>pom</packaging>

@@ -6,18 +6,27 @@ import com.alibaba.fastjson.parser.Feature;
 import com.alibaba.fastjson.serializer.SerializerFeature;
 import com.springboot.dev.vo.Car;
 import com.springboot.dev.vo.User;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.PropertySource;
 import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Component;
 
 
 @Configuration
+@ConfigurationProperties(prefix = "boot")
+@PropertySource("classpath:/a.properties")
+
 public class Config {
+
+    private Integer port;
 
     @Bean
     @Scope
     public User user(){
+        System.out.println(port);
         return new User(car());
     }
     @Bean
@@ -47,5 +56,13 @@ public class Config {
 
         Object obj1 = JSON.parseObject(entity2,User.class);
         System.out.println(obj1);
+    }
+
+    public Integer getPort() {
+        return port;
+    }
+
+    public void setPort(Integer port) {
+        this.port = port;
     }
 }
