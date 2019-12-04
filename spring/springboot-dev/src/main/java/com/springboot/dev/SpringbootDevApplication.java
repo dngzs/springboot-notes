@@ -1,6 +1,5 @@
 package com.springboot.dev;
 
-import com.ctrip.framework.apollo.spring.annotation.EnableApolloConfig;
 import com.springboot.dev.vo.Car;
 import com.springboot.dev.vo.User;
 import org.springframework.boot.SpringApplication;

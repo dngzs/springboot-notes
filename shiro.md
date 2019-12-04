@@ -141,3 +141,645 @@ public void test(){
 
 ## 六、深入理解shiro源码
 
+### 1. shiro web入口EnvironmentLoaderListener 
+
+`EnvironmentLoaderListener` 作为 web的入口，那当然是实现了`ServletContextListener`接口，`javax.servlet.ServletContextListener`是servlet规范里面的接口。它能够监听 `ServletContext` 对象的生命周期，实际上就是监听 Web 应用的生命周期。当Servlet 容器启动或终止Web 应用时，会触发`ServletContextEvent` 事件，该事件由`ServletContextListener` 来处理的
+
+​       Shiro 的 `EnvironmentLoaderListener` 就是一个典型的 `ServletContextListener`，它也是整个 Shiro Web 应用的入口，来看下继承结构
+
+![](shiroimg\4.png)
+
+```java
+public class EnvironmentLoaderListener extends EnvironmentLoader implements ServletContextListener {
+
+    /**
+     * 容器启动时调用
+     */
+    public void contextInitialized(ServletContextEvent sce) {
+        initEnvironment(sce.getServletContext());
+    }
+
+    /**
+     * 容器死亡时调用
+     */
+    public void contextDestroyed(ServletContextEvent sce) {
+        destroyEnvironment(sce.getServletContext());
+    }
+}
+```
+
+从上面我们可以看出`EnvironmentLoaderListener`
+
+(1)  继承自`EnvironmentLoader`
+
+(2)  实现了servlet规范的`ServletContextListener`接口，在web容器启动和死亡的时候会调用上述两个方法
+
+(3)  `EnvironmentLoaderListener`并没有实现任何的代码，真正干活的是`EnvironmentLoader`类
+
+```java
+public class EnvironmentLoader {
+
+    /**
+     *
+     */
+    public static final String ENVIRONMENT_CLASS_PARAM = "shiroEnvironmentClass";
+
+    /**
+     *
+     */
+    public static final String CONFIG_LOCATIONS_PARAM = "shiroConfigLocations";
+
+    public static final String ENVIRONMENT_ATTRIBUTE_KEY = EnvironmentLoader.class.getName() + ".ENVIRONMENT_ATTRIBUTE_KEY";
+
+    private static final Logger log = LoggerFactory.getLogger(EnvironmentLoader.class);
+
+    /**
+     * 从 ServletContext 中获取相关信息，并创建 WebEnvironment 实例
+     */
+    public WebEnvironment initEnvironment(ServletContext servletContext) throws IllegalStateException {
+        //确保WebEnvironment只创建一次
+        if (servletContext.getAttribute(ENVIRONMENT_ATTRIBUTE_KEY) != null) {
+            String msg = "There is already a Shiro environment associated with the current ServletContext.  " +
+                    "Check if you have multiple EnvironmentLoader* definitions in your web.xml!";
+            throw new IllegalStateException(msg);
+        }
+
+        servletContext.log("Initializing Shiro environment");
+        log.info("Starting Shiro environment initialization.");
+
+        long startTime = System.currentTimeMillis();
+
+        try {
+            //尝试从web.xml（context-param  shiroEnvironmentClass）配置中和java SPI尝试获取WebEnvironment，如果获取不到，就返回默认的IniWebEnvironment，并调用WebEnvironment的init方法
+            WebEnvironment environment = createEnvironment(servletContext);
+            //将WebEnvironment设置到servletContext中去
+            servletContext.setAttribute(ENVIRONMENT_ATTRIBUTE_KEY,environment);
+   
+            log.debug("Published WebEnvironment as ServletContext attribute with name [{}]",
+                    ENVIRONMENT_ATTRIBUTE_KEY);
+
+            if (log.isInfoEnabled()) {
+                long elapsed = System.currentTimeMillis() - startTime;
+                log.info("Shiro environment initialized in {} ms.", elapsed);
+            }
+
+            return environment;
+        } catch (RuntimeException ex) {
+            log.error("Shiro environment initialization failed", ex);
+            servletContext.setAttribute(ENVIRONMENT_ATTRIBUTE_KEY, ex);
+            throw ex;
+        } catch (Error err) {
+            log.error("Shiro environment initialization failed", err);
+            servletContext.setAttribute(ENVIRONMENT_ATTRIBUTE_KEY, err);
+            throw err;
+        }
+    }
+
+    /**
+     * 
+     */
+    @Deprecated
+    protected Class<?> determineWebEnvironmentClass(ServletContext servletContext) {
+        //从web.xml（context-param）中获取 WebEnvironment 接口的实现类
+        Class<? extends WebEnvironment> webEnvironmentClass = webEnvironmentClassFromServletContext(servletContext);
+        if( webEnvironmentClass != null) {
+            return webEnvironmentClass;
+        } else {
+            //如果没有配置，则默认返回IniWebEnvironment.class
+            return getDefaultWebEnvironmentClass();
+        }
+    }
+
+    
+    private Class<? extends WebEnvironment> webEnvironmentClassFromServletContext(ServletContext servletContext) {
+
+        Class<? extends WebEnvironment> webEnvironmentClass = null;
+        //从web.xml（context-param）中获取 WebEnvironment 接口的实现类
+        String className = servletContext.getInitParameter(ENVIRONMENT_CLASS_PARAM);
+        if (className != null) {
+            try {
+                webEnvironmentClass = ClassUtils.forName(className);
+            } catch (UnknownClassException ex) {
+                throw new ConfigurationException(
+                        "Failed to load custom WebEnvironment class [" + className + "]", ex);
+            }
+        }
+        return webEnvironmentClass;
+    }
+
+    private WebEnvironment webEnvironmentFromServiceLoader() {
+
+        WebEnvironment webEnvironment = null;
+        // try to load WebEnvironment as a service
+        ServiceLoader<WebEnvironment> serviceLoader = ServiceLoader.load(WebEnvironment.class);
+        Iterator<WebEnvironment> iterator = serviceLoader.iterator();
+
+        // Use the first one
+        if (iterator.hasNext()) {
+            webEnvironment = iterator.next();
+        }
+        // if there are others, throw an error
+        if (iterator.hasNext()) {
+            List<String> allWebEnvironments = new ArrayList<String>();
+            allWebEnvironments.add(webEnvironment.getClass().getName());
+            while (iterator.hasNext()) {
+                allWebEnvironments.add(iterator.next().getClass().getName());
+            }
+            throw new ConfigurationException("ServiceLoader for class [" + WebEnvironment.class + "] returned more then one " +
+                    "result.  ServiceLoader must return zero or exactly one result for this class. Select one using the " +
+                    "servlet init parameter '"+ ENVIRONMENT_CLASS_PARAM +"'. Found: " + allWebEnvironments);
+        }
+        return webEnvironment;
+    }
+
+   
+    protected Class<? extends WebEnvironment> getDefaultWebEnvironmentClass() {
+        return IniWebEnvironment.class;
+    }
+
+    /**
+     * 从web.xml（context-param  shiroEnvironmentClass）配置中和java SPI尝试获取WebEnvironment，如果获取不到，就返回默认的IniWebEnvironment
+     */
+    protected WebEnvironment determineWebEnvironment(ServletContext servletContext) {
+         //确定 WebEnvironment 接口的实现类，先从web.xml（context-param）中获取 WebEnvironment 接口的实现类,如果没有配置，则默认返回
+        Class<? extends WebEnvironment> webEnvironmentClass = webEnvironmentClassFromServletContext(servletContext);
+        WebEnvironment webEnvironment = null;
+
+        //尝试java SPI加载
+        if (webEnvironmentClass == null) {
+            webEnvironment = webEnvironmentFromServiceLoader();
+        }
+
+        // 如果此时两个都是空，则默认是 IniWebEnvironment
+        if (webEnvironmentClass == null && webEnvironment == null) {
+            webEnvironmentClass = getDefaultWebEnvironmentClass();
+        }
+
+        //至此，我们将webEnvironmentClass作为class，并初始化它
+        if (webEnvironmentClass != null) {
+            webEnvironment = (WebEnvironment) ClassUtils.newInstance(webEnvironmentClass);
+        }
+
+        return webEnvironment;
+    }
+
+    /**
+     * 创建web环境
+     */
+    protected WebEnvironment createEnvironment(ServletContext sc) {
+        //创建WebEnvironment
+        WebEnvironment webEnvironment = determineWebEnvironment(sc);
+        //类型检查
+        if (!MutableWebEnvironment.class.isInstance(webEnvironment)) {
+            throw new ConfigurationException("Custom WebEnvironment class [" + webEnvironment.getClass().getName() +
+                    "] is not of required type [" + MutableWebEnvironment.class.getName() + "]");
+        }
+
+        //从 ServletContext 中获取 Shiro 配置文件的位置参数，并判断该参数是否在web.xml配置了
+        String configLocations = sc.getInitParameter(CONFIG_LOCATIONS_PARAM);
+        boolean configSpecified = StringUtils.hasText(configLocations);
+        //若配置文件位置参数已定义，则需确保该实现类实现了 ResourceConfigurable 接口
+        if (configSpecified && !(ResourceConfigurable.class.isInstance(webEnvironment))) {
+            String msg = "WebEnvironment class [" + webEnvironment.getClass().getName() + "] does not implement the " +
+                    ResourceConfigurable.class.getName() + "interface.  This is required to accept any " +
+                    "configured " + CONFIG_LOCATIONS_PARAM + "value(s).";
+            throw new ConfigurationException(msg);
+        }
+        
+        MutableWebEnvironment environment = (MutableWebEnvironment) webEnvironment;
+
+        //将 ServletContext 放入WebEnvironment实例中
+        environment.setServletContext(sc);
+
+        //若配置文件位置参数已定义，且该实例是 ResourceConfigurable 接口的实例（实现了该接口），则将此参数放入该实例中
+        if (configSpecified && (environment instanceof ResourceConfigurable)) {
+            ((ResourceConfigurable) environment).setConfigLocations(configLocations);
+        }
+
+        //可进一步定制 WebEnvironment 实例（在子类中扩展）
+        customizeEnvironment(environment);
+
+        //调用 WebEnvironment 实例的 init 方法
+        LifecycleUtils.init(environment);
+
+        //返回
+        return environment;
+    }
+
+    /**
+     * Any additional customization of the Environment can be by overriding this method. For example setup shared
+     * resources, etc. By default this method does nothing.
+     * @param environment
+     */
+    protected void customizeEnvironment(WebEnvironment environment) {
+    }
+
+    /**
+     * 销毁 WebEnvironment 
+     */
+    public void destroyEnvironment(ServletContext servletContext) {
+        servletContext.log("Cleaning up Shiro Environment");
+        try {
+            Object environment = servletContext.getAttribute(ENVIRONMENT_ATTRIBUTE_KEY);
+            if (environment instanceof WebEnvironment) {
+                finalizeEnvironment((WebEnvironment) environment);
+            }
+            //// 调用 WebEnvironment 实例的 destroy 方法
+            LifecycleUtils.destroy(environment);
+        } finally {
+            //移除 ServletContext 中存放的 WebEnvironment 实例
+            servletContext.removeAttribute(ENVIRONMENT_ATTRIBUTE_KEY);
+        }
+    }
+
+    /**
+     * Any additional cleanup of the Environment can be done by overriding this method.  For example clean up shared
+     * resources, etc. By default this method does nothing.
+     * @param environment
+     * @since 1.3
+     */
+    protected void finalizeEnvironment(WebEnvironment environment) {
+    }
+}
+```
+
+看了EnvironmentLoader的源码，我们来总结下
+
+（1）  当容器启动时，EnvironmentLoader读取web.xml配置，主要配置有下面两个
+
+```xml
+<context-param>
+    <param-name>shiroEnvironmentClass</param-name>
+    <param-value>WebEnvironment 接口的实现类</param-value>
+</context-param>
+<context-param>
+    <param-name>shiroConfigLocations</param-name>
+    <param-value>shiro.ini 配置文件的位置</param-value>
+</context-param>
+```
+
+尝试读取web.xml  context-param shiroEnvironmentClass配置的`WebEnvironment`，如果获取不到，尝试从JAVA SPI获取`WebEnvironment`的实现，如果还获取不到，则返回一个默认的`IniWebEnvironment`实现，并且调用`IniWebEnvironment`的init初始化方法。获取到`WebEnvironment`class对象后，将Environment实例化，并且返回，加载到 ServletContext 中。
+
+shiroConfigLocations再来分析，无疑就是找到shiro.ini文件，将其解析
+
+（2） 容器关闭时，销毁 `WebEnvironment` 实例，并从 ServletContext 将其移除。
+
+简单讲：`EnvironmentLoader` 中仅用于创建 WebEnvironment 接口的实现类，随后将由这个实现类来加载并解析 shiro.ini 配置文件
+
+### 2.  WebEnvironment
+
+先来了解下他的继承结构
+
+![](shiroimg\5.png)
+
+（1）WebEnvironment 的结构非常的复杂
+
+（2） 最底层的 IniWebEnvironment 是 WebEnvironment 接口的默认实现类，它将读取 ini 配置文件，并创建 WebEnvironment 实例。
+
+（3）如果需要将 Shiro 配置定义在 XML 或 Properties 配置文件中，那就需要自定义一些 WebEnvironment 实现类。
+
+（4）WebEnvironment 的实现类不仅需要实现最顶层的 Environment 接口，还需要实现具有生命周期功能的 Initializable 与 Destroyable 接口。
+
+
+
+那么 IniWebEnvironment 这个默认的实现类到底做了写什么呢？来看看它的代码
+
+```java
+public class IniWebEnvironment extends ResourceBasedWebEnvironment implements Initializable, Destroyable {
+
+    // 默认 shiro.ini 路径
+    public static final String DEFAULT_WEB_INI_RESOURCE_PATH = "/WEB-INF/shiro.ini";
+    public static final String FILTER_CHAIN_RESOLVER_NAME = "filterChainResolver";
+
+    private static final Logger log = LoggerFactory.getLogger(IniWebEnvironment.class);
+
+    /**
+     *  定义一个 Ini 对象，用于封装 ini 配置项
+     */
+    private Ini ini;
+
+    private WebIniSecurityManagerFactory factory;
+
+    public IniWebEnvironment() {
+        //初始化SecurityManagerFactory对象，用来生成
+        factory = new WebIniSecurityManagerFactory();
+    }
+
+    /**
+     * Initializes this instance by resolving any potential (explicit or resource-configured) {@link Ini}
+     * configuration and calling {@link #configure() configure} for actual instance configuration.
+     */
+    public void init() {
+
+        setIni(parseConfig());
+
+        configure();
+    }
+
+    /**
+     * 
+     */
+    protected Ini parseConfig() {
+        // 从成员变量中获取 Ini 对象
+        Ini ini = getIni();
+
+        // 从 web.xml 中获取配置文件位置（在 EnvironmentLoader 中已设置）
+        String[] configLocations = getConfigLocations();
+
+        if (log.isWarnEnabled() && !CollectionUtils.isEmpty(ini) &&
+                configLocations != null && configLocations.length > 0) {
+            log.warn("Explicit INI instance has been provided, but configuration locations have also been " +
+                    "specified.  The {} implementation does not currently support multiple Ini config, but this may " +
+                    "be supported in the future. Only the INI instance will be used for configuration.",
+                    IniWebEnvironment.class.getName());
+        }
+        // 若成员变量中不存在，则从已定义的配置文件位置获取
+        if (CollectionUtils.isEmpty(ini)) {
+            log.debug("Checking any specified config locations.");
+            ini = getSpecifiedIni(configLocations);
+        }
+
+        // 若已定义的配置文件中仍然不存在，则从默认的位置获取（/WEB-INF/shiro.ini，classpath:shiro.ini）
+        if (CollectionUtils.isEmpty(ini)) {
+            log.debug("No INI instance or config locations specified.  Trying default config locations.");
+            ini = getDefaultIni();
+        }
+
+        // 留给子类扩展，并且可以两个ini合并
+        ini = mergeIni(getFrameworkIni(), ini);
+
+        if (CollectionUtils.isEmpty(ini)) {
+            String msg = "Shiro INI configuration was either not found or discovered to be empty/unconfigured.";
+            throw new ConfigurationException(msg);
+        }
+        return ini;
+    }
+
+    protected void configure() {
+        //清空这个 Bean 容器（一个 Map<String, Object> 对象，在 DefaultEnvironment 中定义）
+        this.objects.clear();
+
+        WebSecurityManager securityManager = createWebSecurityManager();
+        setWebSecurityManager(securityManager);
+        
+        FilterChainResolver resolver = createFilterChainResolver();
+        if (resolver != null) {
+            setFilterChainResolver(resolver);
+        }
+    }
+
+    /**
+     *扩展点，留给子类扩展
+     * @since 1.4
+     */
+    protected Ini getFrameworkIni() {
+        return null;
+    }
+
+    protected Ini getSpecifiedIni(String[] configLocations) throws ConfigurationException {
+
+        Ini ini = null;
+
+        if (configLocations != null && configLocations.length > 0) {
+
+            if (configLocations.length > 1) {
+                log.warn("More than one Shiro .ini config location has been specified.  Only the first will be " +
+                        "used for configuration as the {} implementation does not currently support multiple " +
+                        "files.  This may be supported in the future however.", IniWebEnvironment.class.getName());
+            }
+
+            //通过第一个配置文件的位置来创建 Ini 对象，且必须有一个配置文件，否则就抛出错误
+            ini = createIni(configLocations[0], true);
+        }
+
+        return ini;
+    }
+
+    protected Ini mergeIni(Ini ini1, Ini ini2) {
+
+        if (ini1 == null) {
+            return ini2;
+        }
+
+        if (ini2 == null) {
+            return ini1;
+        }
+
+        // at this point we have two valid ini objects, create a new one and merge the contents of 2 into 1
+        Ini iniResult = new Ini(ini1);
+        iniResult.merge(ini2);
+
+        return iniResult;
+    }
+
+    protected Ini getDefaultIni() {
+
+        Ini ini = null;
+
+        String[] configLocations = getDefaultConfigLocations();
+        if (configLocations != null) {
+            for (String location : configLocations) {
+                ini = createIni(location, false);
+                if (!CollectionUtils.isEmpty(ini)) {
+                    log.debug("Discovered non-empty INI configuration at location '{}'.  Using for configuration.",
+                            location);
+                    break;
+                }
+            }
+        }
+
+        return ini;
+    }
+
+    /**
+     * required：是否必须加载，如果为true，仍加载不到，则抛出异常
+     */
+    protected Ini createIni(String configLocation, boolean required) throws ConfigurationException {
+
+        Ini ini = null;
+
+        if (configLocation != null) {
+            // 从指定路径下读取配置文件
+            ini = convertPathToIni(configLocation, required);
+        }
+        if (required && CollectionUtils.isEmpty(ini)) {
+            String msg = "Required configuration location '" + configLocation + "' does not exist or did not " +
+                    "contain any INI configuration.";
+            throw new ConfigurationException(msg);
+        }
+
+        return ini;
+    }
+
+    protected FilterChainResolver createFilterChainResolver() {
+
+        FilterChainResolver resolver = null;
+
+        Ini ini = getIni();
+
+        if (!CollectionUtils.isEmpty(ini)) {
+            // Filter 可以从 [urls] 或 [filters] 片段中读取
+            Ini.Section urls = ini.getSection(IniFilterChainResolverFactory.URLS);
+            Ini.Section filters = ini.getSection(IniFilterChainResolverFactory.FILTERS);
+            if (!CollectionUtils.isEmpty(urls) || !CollectionUtils.isEmpty(filters)) {
+                //通过工厂对象创建 FilterChain解析器 实例
+                Factory<FilterChainResolver> factory = (Factory<FilterChainResolver>) this.objects.get(FILTER_CHAIN_RESOLVER_NAME);
+                if (factory instanceof IniFactorySupport) {
+                    IniFactorySupport iniFactory = (IniFactorySupport) factory;
+                    iniFactory.setIni(ini);
+                    iniFactory.setDefaults(this.objects);
+                }
+                resolver = factory.getInstance();
+            }
+        }
+
+        return resolver;
+    }
+
+    protected WebSecurityManager createWebSecurityManager() {
+        //获取到上面设置的Ini对象
+        Ini ini = getIni();
+        if (!CollectionUtils.isEmpty(ini)) {
+            //设置ini对象
+            factory.setIni(ini);
+        }
+        //生成一个key-value map ,响应的“filterChainResolver”-IniFilterChainResolverFactory
+        Map<String, Object> defaults = getDefaults();
+        if (!CollectionUtils.isEmpty(defaults)) {
+            //设置filterChain的解析器工厂
+            factory.setDefaults(defaults);
+        }
+
+        WebSecurityManager wsm = (WebSecurityManager)factory.getInstance();
+
+        //从工厂中获取 Bean Map 并将其放入 Bean 容器中
+        Map<String, ?> beans = factory.getBeans();
+        if (!CollectionUtils.isEmpty(beans)) {
+            this.objects.putAll(beans);
+        }
+
+        return wsm;
+    }
+
+    /**
+     * Returns an array with two elements, {@code /WEB-INF/shiro.ini} and {@code classpath:shiro.ini}.
+     *
+     * @return an array with two elements, {@code /WEB-INF/shiro.ini} and {@code classpath:shiro.ini}.
+     */
+    protected String[] getDefaultConfigLocations() {
+        return new String[]{
+                DEFAULT_WEB_INI_RESOURCE_PATH,
+                IniFactorySupport.DEFAULT_INI_RESOURCE_PATH
+        };
+    }
+
+    /**
+     * 尝试从文件，ServletContext等地方加载ini文件
+     */
+    private Ini convertPathToIni(String path, boolean required) {
+
+        Ini ini = null;
+
+        if (StringUtils.hasText(path)) {
+            InputStream is = null;
+
+            // 若路径不包括资源前缀（classpath:、url:、file:），则从 ServletContext 中读取，否则从这些资源路径下读取
+            if (!ResourceUtils.hasResourcePrefix(path)) {
+                is = getServletContextResourceStream(path);
+            } else {
+                try {
+                    is = ResourceUtils.getInputStreamForPath(path);
+                } catch (IOException e) {
+                    if (required) {
+                        throw new ConfigurationException(e);
+                    } else {
+                        if (log.isDebugEnabled()) {
+                            log.debug("Unable to load optional path '" + path + "'.", e);
+                        }
+                    }
+                }
+            }
+            if (is != null) {
+                //将流中的数据加载到 Ini 对象中
+                ini = new Ini();
+                ini.load(is);
+            } else {
+                if (required) {
+                    throw new ConfigurationException("Unable to load resource path '" + path + "'");
+                }
+            }
+        }
+
+        return ini;
+    }
+
+    //TODO - this logic is ugly - it'd be ideal if we had a Resource API to polymorphically encaspulate this behavior
+    private InputStream getServletContextResourceStream(String path) {
+        InputStream is = null;
+        // 需要将路径进行标准化
+        path = WebUtils.normalize(path);
+        ServletContext sc = getServletContext();
+        if (sc != null) {
+            is = sc.getResourceAsStream(path);
+        }
+
+        return is;
+    }
+
+ 
+    public Ini getIni() {
+        return this.ini;
+    }
+
+
+    public void setIni(Ini ini) {
+        this.ini = ini;
+    }
+
+    
+    protected Map<String, Object> getDefaults() {
+        Map<String, Object> defaults = new HashMap<String, Object>();
+        defaults.put(FILTER_CHAIN_RESOLVER_NAME, new IniFilterChainResolverFactory());
+        return defaults;
+    }
+
+
+    @SuppressWarnings("unused")
+    protected WebIniSecurityManagerFactory getSecurityManagerFactory() {
+        return factory;
+    }
+
+    protected void setSecurityManagerFactory(WebIniSecurityManagerFactory factory) {
+        this.factory = factory;
+    }
+}
+```
+
+基本看了下`IniWebEnvironment` 的逻辑，我们来总结下
+
+（1） 查找并加载 shiro.ini 配置文件，首先从自身成员变量里查找，然后从 web.xml 中查找，然后从 /WEB-INF 下查找，然后从 classpath 下查找，若均未找到，则直接报错。
+
+（2） 当找到了 ini 配置文件后就开始解析，此时构造了一个 Bean 容器（相当于一个轻量级的 IOC 容器），最终的目标是为了创建 WebSecurityManager 对象与 FilterChainResolver 对象，创建过程使用了 Abstract Factory 模式
+
+![](shiroimg\6.png)
+
+可以看到，两三个已经过期了，过期的原因是
+
+```
+use Shiro's {@code Environment} mechanisms instead.
+请改用Shiro的Environment机制。
+```
+
+其中有两个 Factory 需要关注：
+
+- `WebIniSecurityManagerFactory` 用于创建 `WebSecurityManager`。
+- `IniFilterChainResolverFactory` 用于创建 `FilterChainResolver`。
+
+
+
+通过以上分析，相信 `EnvironmentLoaderListener` 已经不再神秘了，无非就是在容器启动时创建 `WebEnvironment` 对象，并由该对象来读取 Shiro 配置文件，创建`WebSecurityManager` 与 `FilterChainResolver` 对象，它们都在后面将要出现的 `ShiroFilter` 中起到了重要作用。
+
+从 web.xml 中同样可以得知，`ShiroFilter` 是整个 Shiro 框架的门面，因为它拦截了所有的请求，后面是需要 `Authentication`（认证）还是需要 `Authorization`（授权）都由它说了算。
+
+> 参考： https://my.oschina.net/huangyong/blog/209339
+
