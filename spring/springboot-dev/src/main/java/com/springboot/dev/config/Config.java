@@ -15,10 +15,8 @@ import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Component;
 
 
-@Configuration
-@ConfigurationProperties(prefix = "boot")
-@PropertySource("classpath:/a.properties")
 
+@Configuration
 public class Config {
 
     private Integer port;
